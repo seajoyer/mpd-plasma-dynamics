@@ -1,0 +1,7 @@
+.direnv
+.cache
+*.log
+.envrc
+flake.nix
+flake.lock
+build/*
