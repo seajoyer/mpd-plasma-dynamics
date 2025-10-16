@@ -275,6 +275,15 @@ void write_vtk(const char *filename, int L_max, int M_max, double dz, double **r
     out.close();
 }
 
+/**
+ * Writes simulation data for v_z to see acceleration
+ * @param filename Output filename
+ * @param L_max Maximum number of axial grid points
+ * @param M_max Maximum number of radial grid points
+ * @param dz Axial grid spacing
+ * @param r Radial coordinate array
+ * @param v_z Axial velocity array
+ */
 void write_csv(const char *filename, const int L_max, const int M_max, const double dz, double **r, double **v_z) {
     std::ofstream out(filename);
     out << "z,r,v_z" << std::endl;
