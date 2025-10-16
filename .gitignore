@@ -5,4 +5,3 @@
 flake.nix
 flake.lock
 build/*
-.idea/
