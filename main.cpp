@@ -376,6 +376,27 @@ void write_vtk(const char* filename, int L_max, int M_max, double dz, double **r
 }
 
 /**
+ * Writes simulation data for v_z to see acceleration
+ * @param filename Output filename
+ * @param L_max Maximum number of axial grid points
+ * @param M_max Maximum number of radial grid points
+ * @param dz Axial grid spacing
+ * @param r Radial coordinate array
+ * @param v_z Axial velocity array
+ */
+void write_csv(const char *filename, const int L_max, const int M_max, const double dz, double **r, double **v_z) {
+    std::ofstream out(filename);
+    out << "z,r,v_z" << std::endl;
+    for (int m = 0; m < M_max + 1; m++) {
+        for (int l = 0; l < L_max + 1; l++) {
+            out << l * dz << "," << r[l][m] << "," << v_z[l][m] << "\n";
+        }
+    }
+
+    out.close();
+}
+
+/**
  * Finds the maximum value in a 2D array
  * Used for stability analysis and time step control
  * @param array 2D array to search
@@ -1071,6 +1092,9 @@ int main(int argc, char *argv[]) {
               e, H_z, H_r, H_phi);
     std::cout << "Results written to 28-2D_MHD_LF_rzphi_MPD.vtk" << std::endl;
 
+    write_csv("v_z.csv", L_max, M_max, dz, r, v_z);
+
+    std::cout << "Results written to v_z.csv" << std::endl;
     // ============================================================================
     // MEMORY CLEANUP
     // ============================================================================
