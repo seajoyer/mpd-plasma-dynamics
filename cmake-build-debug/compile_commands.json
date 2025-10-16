@@ -1,0 +1,8 @@
+[
+{
+  "directory": "D:/cpp/diploma/mpd-plasma-dynamics/cmake-build-debug",
+  "command": "clang++ -g -std=gnu++17 -fdiagnostics-color=always -Wall -Wextra -O2 -fopenmp -o CMakeFiles\\cpp_openmp_project.dir\\main.cpp.obj -c D:\\cpp\\diploma\\mpd-plasma-dynamics\\main.cpp",
+  "file": "D:\\cpp\\diploma\\mpd-plasma-dynamics\\main.cpp",
+  "output": "CMakeFiles\\cpp_openmp_project.dir\\main.cpp.obj"
+}
+]
