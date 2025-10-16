@@ -1,3 +1,0 @@
-D:/cpp/diploma/mpd-plasma-dynamics/cmake-build-debug/CMakeFiles/cpp_openmp_project.dir
-D:/cpp/diploma/mpd-plasma-dynamics/cmake-build-debug/CMakeFiles/edit_cache.dir
-D:/cpp/diploma/mpd-plasma-dynamics/cmake-build-debug/CMakeFiles/rebuild_cache.dir
