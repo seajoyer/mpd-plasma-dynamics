@@ -8,11 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Enable compile_commands.json generation for language servers
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Force use of Clang
-set(CMAKE_C_COMPILER clang)
-set(CMAKE_CXX_COMPILER clang++)
+# Force use of G++
+set(CMAKE_C_COMPILER gcc)
+set(CMAKE_CXX_COMPILER g++)
 
-# Help CMake find OpenMP for Clang
+# Help CMake find OpenMP for G++
 # This is important for NixOS environments
 if(DEFINED ENV{CPATH})
     string(REPLACE ":" ";" CPATH_LIST $ENV{CPATH})
@@ -47,7 +47,7 @@ add_executable(${PROJECT_NAME} main.cpp)
 # Link OpenMP to your executable
 target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
 
-# Clang-specific compiler flags
+# G++-specific compiler flags
 target_compile_options(${PROJECT_NAME} PRIVATE
     -Wall
     -Wextra
