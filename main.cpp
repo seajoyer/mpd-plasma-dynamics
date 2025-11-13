@@ -97,14 +97,29 @@ void memory_clearing_2D(double **&array, int rows) {
  * @return Inner radius value
  */
 double r1(double z) {
-    if (z < 0.3) {
-        return 0.2; // Constant radius in the initial section
-    } else if (z >= 0.3 && z < 0.4) {
-        return 0.2 - 10 * pow((z - 0.3), 2); // Quadratic constriction
-    } else if (z >= 0.4 && z < 0.478) {
-        return 10 * pow((z - 0.5), 2); // Quadratic expansion
-    } else {
-        return 0.005; // Narrow throat region
+    const double z_center = 0.31;      // Центр ступеньки
+    const double transition_width = 0.015; // Полуширина перехода (уже в ~5 раз)
+    const double r_before = 0.2;       // Радиус до ступеньки
+    const double r_after = 0.005;      // Радиус после ступеньки (узкое горло)
+
+    // Начало и конец переходной зоны
+    const double z_start = z_center - transition_width;
+    const double z_end = z_center + transition_width;
+
+    if (z < z_start) {
+        // Постоянный радиус до ступеньки
+        return r_before;
+    }
+    else if (z >= z_start && z < z_end) {
+        // Плавный переход используя косинусоидальную функцию (C² непрерывность)
+        // Это обеспечивает гладкость производных
+        double xi = (z - z_start) / (z_end - z_start); // нормализованная координата [0,1]
+        double smooth_factor = 0.5 * (1.0 - cos(M_PI * xi)); // S-образная кривая
+        return r_before + (r_after - r_before) * smooth_factor;
+    }
+    else {
+        // Узкое горло после ступеньки
+        return r_after;
     }
 }
 
@@ -123,14 +138,26 @@ double r2(double z) {
  * @return Derivative of inner radius
  */
 double der_r1(double z) {
-    if (z < 0.3) {
-        return 0; // No slope in constant region
-    } else if (z >= 0.3 && z < 0.4) {
-        return -10 * 2 * (z - 0.3); // Negative slope (constriction)
-    } else if (z >= 0.4 && z < 0.478) {
-        return 10 * 2 * (z - 0.5); // Positive slope (expansion)
-    } else {
-        return 0; // No slope in throat region
+    const double z_center = 0.31;
+    const double transition_width = 0.015;
+    const double r_before = 0.2;
+    const double r_after = 0.005;
+
+    const double z_start = z_center - transition_width;
+    const double z_end = z_center + transition_width;
+
+    if (z < z_start) {
+        return 0.0; // Постоянный радиус - нулевая производная
+    }
+    else if (z >= z_start && z < z_end) {
+        // Производная косинусоидальной функции
+        double xi = (z - z_start) / (z_end - z_start);
+        double dxi_dz = 1.0 / (z_end - z_start);
+        double dsmooth_dxi = 0.5 * M_PI * sin(M_PI * xi);
+        return (r_after - r_before) * dsmooth_dxi * dxi_dz;
+    }
+    else {
+        return 0.0; // Постоянный радиус после ступеньки
     }
 }
 
@@ -520,11 +547,11 @@ int main(int argc, char *argv[]) {
 
     double T = 10.0;      // Total simulation time
     double t = 0.0;       // Current time
-    double dt = 0.00000625; // Time step size
+    double dt = 0.0000125; // Time step size
 
-    int L_max = 3200; // Number of axial grid points
-    int L_end = 1280; // Transition point for boundary conditions
-    int M_max = 1600; // Number of radial grid points
+    int L_max = 800; // Number of axial grid points
+    int L_end = 265; // Transition point for boundary conditions
+    int M_max = 400; // Number of radial grid points
 
     double dz = 1.0 / L_max; // Axial grid spacing
     double dy = 1.0 / M_max; // Normalized radial coordinate spacing
