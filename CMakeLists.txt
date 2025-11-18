@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(cpp_openmp_project)
+project(mpd-plasma-dynamics)
 
 # Enable C++17 (or adjust to your preferred standard)
 set(CMAKE_CXX_STANDARD 17)
@@ -8,12 +8,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Enable compile_commands.json generation for language servers
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Force use of G++
-set(CMAKE_C_COMPILER gcc)
-set(CMAKE_CXX_COMPILER g++)
+# Use MPI compilers (adjust if needed for your environment, e.g., mpicxx)
 
-# Help CMake find OpenMP for G++
-# This is important for NixOS environments
+find_package(OpenMP REQUIRED)
+find_package(MPI REQUIRED)
+set(CMAKE_C_COMPILER ${MPI_C_COMPILER})
+set(CMAKE_CXX_COMPILER ${MPI_CXX_COMPILER})
+
+# Help CMake find additional paths if needed (retained from original for compatibility)
 if(DEFINED ENV{CPATH})
     string(REPLACE ":" ";" CPATH_LIST $ENV{CPATH})
     foreach(path ${CPATH_LIST})
@@ -28,26 +30,29 @@ if(DEFINED ENV{LIBRARY_PATH})
     endforeach()
 endif()
 
-# Find OpenMP package
-find_package(OpenMP REQUIRED)
+# Check if MPI was found
+if(MPI_CXX_FOUND)
+    message(STATUS "MPI found")
+    message(STATUS "MPI version: ${MPI_CXX_VERSION}")
+    message(STATUS "MPI C++ compiler: ${MPI_CXX_COMPILER}")
+    message(STATUS "MPI C++ include dirs: ${MPI_CXX_INCLUDE_PATH}")
+    message(STATUS "MPI C++ libraries: ${MPI_CXX_LIBRARIES}")
 
-# Check if OpenMP was found
-if(OpenMP_CXX_FOUND)
     message(STATUS "OpenMP found")
     message(STATUS "OpenMP version: ${OpenMP_CXX_VERSION}")
     message(STATUS "OpenMP C++ flags: ${OpenMP_CXX_FLAGS}")
     message(STATUS "OpenMP C++ libraries: ${OpenMP_CXX_LIBRARIES}")
 else()
-    message(FATAL_ERROR "OpenMP not found")
+    message(FATAL_ERROR "MPI and/or OpenMP not found")
 endif()
 
 # Add your executable (replace 'main.cpp' with your source files)
 add_executable(${PROJECT_NAME} main.cpp)
 
-# Link OpenMP to your executable
-target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
+# Link MPI to your executable
+target_link_libraries(${PROJECT_NAME} PRIVATE MPI::MPI_CXX OpenMP::OpenMP_CXX)
 
-# G++-specific compiler flags
+# Compiler flags (removed OpenMP-specific, added general ones; adjust as needed for MPI)
 target_compile_options(${PROJECT_NAME} PRIVATE
     -Wall
     -Wextra

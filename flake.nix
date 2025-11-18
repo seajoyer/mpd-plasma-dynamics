@@ -20,7 +20,8 @@
             # Use clang from the same LLVM package set
             llvmPackages.clang
             llvmPackages.openmp
-
+            mpi
+            
             # Build tools
             libgcc
             cmake
