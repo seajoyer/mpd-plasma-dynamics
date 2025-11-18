@@ -5,6 +5,63 @@
 #include<omp.h>
 #include<mpi.h>
 
+double compute_solution_change(double **rho_curr, double **rho_prev,
+                               double **v_z_curr, double **v_z_prev,
+                               double **v_r_curr, double **v_r_prev,
+                               double **v_phi_curr, double **v_phi_prev,
+                               double **H_z_curr, double **H_z_prev,
+                               double **H_r_curr, double **H_r_prev,
+                               double **H_phi_curr, double **H_phi_prev,
+                               int local_L, int M_max) {
+
+    double sum_sq_diff = 0.0;
+    double sum_sq_curr = 0.0;
+
+    // OpenMP parallel reduction over interior cells (excluding ghost cells)
+    #pragma omp parallel for collapse(2) reduction(+:sum_sq_diff, sum_sq_curr)
+    for (int l = 1; l < local_L + 1; l++) {
+        for (int m = 0; m < M_max + 1; m++) {
+            // Density contribution
+            double d_rho = rho_curr[l][m] - rho_prev[l][m];
+            sum_sq_diff += d_rho * d_rho;
+            sum_sq_curr += rho_curr[l][m] * rho_curr[l][m];
+
+            // Velocity contributions
+            double d_vz = v_z_curr[l][m] - v_z_prev[l][m];
+            double d_vr = v_r_curr[l][m] - v_r_prev[l][m];
+            double d_vphi = v_phi_curr[l][m] - v_phi_prev[l][m];
+            sum_sq_diff += d_vz * d_vz + d_vr * d_vr + d_vphi * d_vphi;
+            sum_sq_curr += v_z_curr[l][m] * v_z_curr[l][m] +
+                           v_r_curr[l][m] * v_r_curr[l][m] +
+                           v_phi_curr[l][m] * v_phi_curr[l][m];
+
+            // Magnetic field contributions
+            double d_Hz = H_z_curr[l][m] - H_z_prev[l][m];
+            double d_Hr = H_r_curr[l][m] - H_r_prev[l][m];
+            double d_Hphi = H_phi_curr[l][m] - H_phi_prev[l][m];
+            sum_sq_diff += d_Hz * d_Hz + d_Hr * d_Hr + d_Hphi * d_Hphi;
+            sum_sq_curr += H_z_curr[l][m] * H_z_curr[l][m] +
+                           H_r_curr[l][m] * H_r_curr[l][m] +
+                           H_phi_curr[l][m] * H_phi_curr[l][m];
+        }
+    }
+
+    // MPI reduction across all processes
+    double global_sum_sq_diff = 0.0;
+    double global_sum_sq_curr = 0.0;
+    MPI_Allreduce(&sum_sq_diff, &global_sum_sq_diff, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&sum_sq_curr, &global_sum_sq_curr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+    double norm_diff = std::sqrt(global_sum_sq_diff);
+    double norm_curr = std::sqrt(global_sum_sq_curr);
+
+    if (norm_curr > 1e-15) {
+        return norm_diff / norm_curr;
+    }
+
+    return norm_diff;
+}
+
 void memory_allocation_2D(double** &array, int rows, int columns) {
 	array = new double* [rows];
     for (int i = 0; i < rows; i++) {
@@ -125,6 +182,10 @@ int main(int argc, char* argv[]) {
 	double H_z0 = 0.25;
 	int animate = 0;
 
+    // convergence parameters
+    double convergence_threshold = 0.0;  // 0 means no convergence check
+    int check_frequency = 100;
+
     // discrete solution area
     double T = 10.0;
     double t = 0.0;
@@ -158,6 +219,16 @@ int main(int argc, char* argv[]) {
 	if (argc > 1) {
 		procs = atoi(argv[1]);
 	}
+
+    for (int i = 2; i < argc - 1; i++) {
+        if (std::string(argv[i]) == "--converge") {
+            convergence_threshold = atof(argv[i + 1]);
+            if (rank == 0) {
+                printf("Convergence checking enabled: threshold = %e\n", convergence_threshold);
+            }
+            break;
+        }
+    }
 
 	omp_set_num_threads(procs);
 
@@ -199,6 +270,19 @@ int main(int argc, char* argv[]) {
 	memory_allocation_2D(H_r, local_L_with_ghosts, M_max + 1);
 	memory_allocation_2D(H_phi, local_L_with_ghosts, M_max + 1);
 	memory_allocation_2D(H_z, local_L_with_ghosts, M_max + 1);
+
+    double **rho_prev = nullptr, **v_z_prev = nullptr, **v_r_prev = nullptr, **v_phi_prev = nullptr;
+    double **H_z_prev = nullptr, **H_r_prev = nullptr, **H_phi_prev = nullptr;
+    
+    if (convergence_threshold > 0) {
+        memory_allocation_2D(rho_prev, local_L_with_ghosts, M_max + 1);
+        memory_allocation_2D(v_z_prev, local_L_with_ghosts, M_max + 1);
+        memory_allocation_2D(v_r_prev, local_L_with_ghosts, M_max + 1);
+        memory_allocation_2D(v_phi_prev, local_L_with_ghosts, M_max + 1);
+        memory_allocation_2D(H_z_prev, local_L_with_ghosts, M_max + 1);
+        memory_allocation_2D(H_r_prev, local_L_with_ghosts, M_max + 1);
+        memory_allocation_2D(H_phi_prev, local_L_with_ghosts, M_max + 1);
+    }
 
 	double **r, **r_z;
 	memory_allocation_2D(r, local_L_with_ghosts, M_max + 1);
@@ -248,6 +332,21 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+    if (convergence_threshold > 0) {
+        #pragma omp parallel for collapse(2)
+        for (int l = 0; l < local_L_with_ghosts; l++) {
+            for (int m = 0; m < M_max + 1; m++) {
+                rho_prev[l][m] = rho[l][m];
+                v_z_prev[l][m] = v_z[l][m];
+                v_r_prev[l][m] = v_r[l][m];
+                v_phi_prev[l][m] = v_phi[l][m];
+                H_z_prev[l][m] = H_z[l][m];
+                H_r_prev[l][m] = H_r[l][m];
+                H_phi_prev[l][m] = H_phi[l][m];
+            }
+        }
+    }
+
 	// filling meshes for u
 	#pragma omp parallel for collapse(2)
 	for (int l = 1; l < local_L_with_ghosts - 1; l++) {
@@ -274,8 +373,11 @@ int main(int argc, char* argv[]) {
 		begin = MPI_Wtime();
 	}
 
+    int step_count = 0;
+    bool converged = false;
+
 	// start time
-    while (t < T) {
+    while (t < T && !converged) {
 
 		// Exchange ghost cells between processes for all variables
 		// We need to exchange 8 u variables
@@ -614,25 +716,60 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+        if (convergence_threshold > 0 && step_count % check_frequency == 0) {
+            double change = compute_solution_change(
+                rho, rho_prev, v_z, v_z_prev, v_r, v_r_prev,
+                v_phi, v_phi_prev, H_z, H_z_prev, H_r, H_r_prev,
+                H_phi, H_phi_prev, local_L, M_max
+            );
+            
+            if (rank == 0) {
+                printf("Step %d, t=%.6f, relative change: %.6e\n", 
+                       step_count, t, change);
+            }
+            
+            if (change < convergence_threshold) {
+                converged = true;
+                if (rank == 0) {
+                    printf("Converged at t=%.6f after %d steps\n", t, step_count);
+                }
+            }
+
+            #pragma omp parallel for collapse(2)
+            for (int l = 1; l < local_L + 1; l++) {
+                for (int m = 0; m < M_max + 1; m++) {
+                    rho_prev[l][m] = rho[l][m];
+                    v_z_prev[l][m] = v_z[l][m];
+                    v_r_prev[l][m] = v_r[l][m];
+                    v_phi_prev[l][m] = v_phi[l][m];
+                    H_z_prev[l][m] = H_z[l][m];
+                    H_r_prev[l][m] = H_r[l][m];
+                    H_phi_prev[l][m] = H_phi[l][m];
+                }
+            }
+        }
+
 		// animation output
-		if ((int)(t * 10000) % 1000 == 0 && animate == 1) {
-			animate_write((int)(t * 10000), local_L, M_max, dz, r, rho, v_z, v_r, v_phi, e, H_z, H_r, H_phi, rank, size, l_start);
-		}
+        if ((int)(t * 10000) % 1000 == 0 && animate == 1) {
+            animate_write((int)(t * 10000), local_L, M_max, dz, r, rho, v_z, v_r, v_phi, 
+                         e, H_z, H_r, H_phi, rank, size, l_start);
+        }
 
         // time step
         t += dt;
+        step_count++;
 
-		// checkout
-		if (rank == 0) {
-			int check_l = 20;
-			int check_m = 40;
-			if (check_l >= l_start && check_l <= l_end) {
-				int local_check_l = check_l - l_start + 1;
-				printf("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, rho[local_check_l][check_m], 
-					v_z[local_check_l][check_m], v_phi[local_check_l][check_m], 
-					e[local_check_l][check_m], H_phi[local_check_l][check_m]);
-			}
-		}
+        // checkout
+        if (rank == 0 && step_count % 1000 == 0) {
+            int check_l = 20;
+            int check_m = 40;
+            if (check_l >= l_start && check_l <= l_end) {
+                int local_check_l = check_l - l_start + 1;
+                printf("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t, rho[local_check_l][check_m], 
+                    v_z[local_check_l][check_m], v_phi[local_check_l][check_m], 
+                    e[local_check_l][check_m], H_phi[local_check_l][check_m]);
+            }
+        }
     }
 
 	// finish count time
@@ -854,6 +991,16 @@ int main(int argc, char* argv[]) {
 	delete[] send_right;
 	delete[] recv_left;
 	delete[] recv_right;
+
+    if (convergence_threshold > 0) {
+        memory_clearing_2D(rho_prev, local_L_with_ghosts);
+        memory_clearing_2D(v_z_prev, local_L_with_ghosts);
+        memory_clearing_2D(v_r_prev, local_L_with_ghosts);
+        memory_clearing_2D(v_phi_prev, local_L_with_ghosts);
+        memory_clearing_2D(H_z_prev, local_L_with_ghosts);
+        memory_clearing_2D(H_r_prev, local_L_with_ghosts);
+        memory_clearing_2D(H_phi_prev, local_L_with_ghosts);
+    }
 
 	MPI_Finalize();
 	return 0;

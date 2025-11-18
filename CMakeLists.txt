@@ -12,8 +12,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(OpenMP REQUIRED)
 find_package(MPI REQUIRED)
-set(CMAKE_C_COMPILER ${MPI_C_COMPILER})
-set(CMAKE_CXX_COMPILER ${MPI_CXX_COMPILER})
+set(CMAKE_C_COMPILER   gcc)
+set(CMAKE_CXX_COMPILER g++)
 
 # Help CMake find additional paths if needed (retained from original for compatibility)
 if(DEFINED ENV{CPATH})

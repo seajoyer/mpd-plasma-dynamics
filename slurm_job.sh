@@ -1,14 +1,37 @@
 #!/bin/bash
-#SBATCH --job-name=slurm_job
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=48
-#SBATCH --time=120:00:00
+#SBATCH --job-name=mpd-plasma-hybrid
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=1  # 1 MPI task per node (total: 2 MPI tasks)
+#SBATCH --cpus-per-task=32   # 32 OpenMP threads per MPI task (total: 64 CPUs)
+#SBATCH --time=00:30:00      # Short for testing; increase to 02:00:00 later
 #SBATCH --mem=4G
-#SBATCH --output=output_%j.log
-#SBATCH --error=error_%j.log
+#SBATCH --output=log/mpd-plasma-%j.out
+#SBATCH --error=log/mpd-plasma-%j.err
 
-# Set OMP_NUM_THREADS for safety
-export OMP_NUM_THREADS=48
+# Load modules (adjust if needed; ensures OpenMP/MPI compatibility)
+# module purge
+# module load gcc  # Or intel if you compiled with it
 
-# Run your executable with 48 as the command-line argument
-./build/cpp_openmp_project 48
+# Set OpenMP environment variables
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export OMP_PLACES=cores
+export OMP_PROC_BIND=false  # Disable OpenMP binding to avoid MPI conflicts
+
+# Echo variables for debugging (will appear in .out log)
+echo "=== SLURM Debug Info ==="
+echo "SLURM_NTASKS: ${SLURM_NTASKS}"
+echo "SLURM_CPUS_PER_TASK: ${SLURM_CPUS_PER_TASK}"
+echo "OMP_NUM_THREADS: ${OMP_NUM_THREADS}"
+echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
+echo "Date: $(date)"
+echo "======================"
+
+# Optional: Disable some OpenMPI MCA params for better hybrid perf
+# export OMPI_MCA_hwloc_base_binding_policy=none
+
+# Launch the hybrid job
+mpirun -np ${SLURM_NTASKS} --bind-to none ./build/mpd-plasma-dynamics ${OMP_NUM_THREADS}
+
+# Job summary
+echo "Job completed at $(date)"
+echo "Used ${SLURM_NTASKS} MPI tasks with ${OMP_NUM_THREADS} OpenMP threads each on ${SLURM_JOB_NODELIST}"
