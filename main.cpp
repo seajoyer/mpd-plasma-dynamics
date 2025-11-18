@@ -154,6 +154,128 @@ void animate_write(int n, int L_max, int M_max, double dz, double **r,
 	out.close();
 }
 
+void write_vtk(const char *filename, int L_max_global, int M_max, double dz,
+                   double **r_global, double **rho_global, double **v_z_global, 
+                   double **v_r_global, double **v_phi_global, double **e_global, 
+                   double **H_z_global, double **H_r_global, double **H_phi_global) {
+
+    std::ofstream out(filename);
+    if (!out) {
+        std::cerr << "Error opening " << filename << std::endl;
+        return;
+    }
+
+    out << "# vtk DataFile Version 2.0" << std::endl;
+    out << "MHD Simulation" << std::endl;
+    out << "ASCII" << std::endl;
+    out << "DATASET STRUCTURED_GRID" << std::endl;
+
+    int nx = L_max_global + 1; // z direction
+    int ny = M_max + 1;        // r direction
+    int nz = 1;
+    out << "DIMENSIONS " << nx << " " << ny << " " << nz << std::endl;
+
+    int npoints = nx * ny * nz;
+    out << "POINTS " << npoints << " float" << std::endl;
+
+    // Write points: r as x, z as y, 0 as z_coord
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double x = (l < L_max_global) ? r_global[l][m] : r_global[L_max_global-1][m];
+            double y = l * dz;
+            double z_coord = 0.0;
+            out << x << " " << y << " " << z_coord << std::endl;
+        }
+    }
+
+    out << "POINT_DATA " << npoints << std::endl;
+
+    // SCALARS Rho
+    out << "SCALARS Rho float 1" << std::endl;
+    out << "LOOKUP_TABLE default" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double val = (l < L_max_global) ? rho_global[l][m] : rho_global[L_max_global-1][m];
+            out << val << std::endl;
+        }
+    }
+
+    // VECTORS Velocity (v_r, v_z, 0)
+    out << "VECTORS Velocity float" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double vr = (l < L_max_global) ? v_r_global[l][m] : v_r_global[L_max_global-1][m];
+            double vz = (l < L_max_global) ? v_z_global[l][m] : v_z_global[L_max_global-1][m];
+            out << vr << " " << vz << " 0.0" << std::endl;
+        }
+    }
+
+    // SCALARS Vphi
+    out << "SCALARS Vphi float 1" << std::endl;
+    out << "LOOKUP_TABLE default" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double val = (l < L_max_global) ? v_phi_global[l][m] : v_phi_global[L_max_global-1][m];
+            out << val << std::endl;
+        }
+    }
+
+    // SCALARS Energy
+    out << "SCALARS Energy float 1" << std::endl;
+    out << "LOOKUP_TABLE default" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double val = (l < L_max_global) ? e_global[l][m] : e_global[L_max_global-1][m];
+            out << val << std::endl;
+        }
+    }
+
+    // VECTORS MagneticField (H_r, H_z, 0)
+    out << "VECTORS MagneticField float" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double hr = (l < L_max_global) ? H_r_global[l][m] : H_r_global[L_max_global-1][m];
+            double hz = (l < L_max_global) ? H_z_global[l][m] : H_z_global[L_max_global-1][m];
+            out << hr << " " << hz << " 0.0" << std::endl;
+        }
+    }
+
+    // SCALARS Hphi
+    out << "SCALARS Hphi float 1" << std::endl;
+    out << "LOOKUP_TABLE default" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double val = (l < L_max_global) ? H_phi_global[l][m] : H_phi_global[L_max_global-1][m];
+            out << val << std::endl;
+        }
+    }
+
+    // SCALARS Vl = sqrt(v_z^2 + v_r^2)
+    out << "SCALARS Vl float 1" << std::endl;
+    out << "LOOKUP_TABLE default" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double vr = (l < L_max_global) ? v_r_global[l][m] : v_r_global[L_max_global-1][m];
+            double vz = (l < L_max_global) ? v_z_global[l][m] : v_z_global[L_max_global-1][m];
+            double vl = std::sqrt(vz * vz + vr * vr);
+            out << vl << std::endl;
+        }
+    }
+
+    // SCALARS Hphi*r
+    out << "SCALARS Hphi_r float 1" << std::endl;
+    out << "LOOKUP_TABLE default" << std::endl;
+    for (int m = 0; m < ny; ++m) {
+        for (int l = 0; l < nx; ++l) {
+            double hphi = (l < L_max_global) ? H_phi_global[l][m] : H_phi_global[L_max_global-1][m];
+            double r_val = (l < L_max_global) ? r_global[l][m] : r_global[L_max_global-1][m];
+            out << hphi * r_val << std::endl;
+        }
+    }
+
+    out.close();
+}
+
 double max_array(double **array, double L, double M) {
 	double maxim = 0.0;
 
@@ -779,26 +901,25 @@ int main(int argc, char* argv[]) {
 		printf("Calculation time : %lf sec\n", total);
 	}
 
-	// Gather results to rank 0 for final output
-	// Allocate global arrays on rank 0
+    // Gather results to rank 0 for VTK output
 	double **rho_global = nullptr, **v_z_global = nullptr, **v_r_global = nullptr;
 	double **v_phi_global = nullptr, **e_global = nullptr;
 	double **H_z_global = nullptr, **H_r_global = nullptr, **H_phi_global = nullptr;
 	double **r_global = nullptr;
 	
 	if (rank == 0) {
-		memory_allocation_2D(rho_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(v_z_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(v_r_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(v_phi_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(e_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(H_z_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(H_r_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(H_phi_global, L_max_global + 1, M_max + 1);
-		memory_allocation_2D(r_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(rho_global, L_max_global, M_max + 1);
+		memory_allocation_2D(v_z_global, L_max_global, M_max + 1);
+		memory_allocation_2D(v_r_global, L_max_global, M_max + 1);
+		memory_allocation_2D(v_phi_global, L_max_global, M_max + 1);
+		memory_allocation_2D(e_global, L_max_global, M_max + 1);
+		memory_allocation_2D(H_z_global, L_max_global, M_max + 1);
+		memory_allocation_2D(H_r_global, L_max_global, M_max + 1);
+		memory_allocation_2D(H_phi_global, L_max_global, M_max + 1);
+		memory_allocation_2D(r_global, L_max_global, M_max + 1);
 	}
 
-	// Gather data row by row
+	// Gather data row by row (excluding ghost cells)
 	for (int m = 0; m < M_max + 1; m++) {
 		double *local_row_rho = new double[local_L];
 		double *local_row_vz = new double[local_L];
@@ -895,6 +1016,24 @@ int main(int argc, char* argv[]) {
 		delete[] local_row_r;
 		delete[] recvcounts;
 		delete[] displs;
+	}
+
+	// Write VTK output (only rank 0)
+	if (rank == 0) {
+		write_vtk("output_MHD.vtk", L_max_global, M_max, dz,
+		              r_global, rho_global, v_z_global, v_r_global,
+		              v_phi_global, e_global, H_z_global, H_r_global, H_phi_global);
+
+		// Clear global memory
+		memory_clearing_2D(rho_global, L_max_global);
+		memory_clearing_2D(v_z_global, L_max_global);
+		memory_clearing_2D(v_r_global, L_max_global);
+		memory_clearing_2D(v_phi_global, L_max_global);
+		memory_clearing_2D(e_global, L_max_global);
+		memory_clearing_2D(H_z_global, L_max_global);
+		memory_clearing_2D(H_r_global, L_max_global);
+		memory_clearing_2D(H_phi_global, L_max_global);
+		memory_clearing_2D(r_global, L_max_global);
 	}
 
 	// output results in file (only rank 0)
