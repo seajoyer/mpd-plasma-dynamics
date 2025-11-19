@@ -171,6 +171,21 @@ double der_r2(double z) {
 }
 
 /**
+ * Check if a given z-coordinate is in the inlet region (step surface)
+ * @param z Axial coordinate
+ * @return true if in inlet region
+ */
+bool is_inlet_region(double z) {
+    const double z_center = 0.31;
+    const double transition_width = 0.015;
+    const double z_start = z_center - transition_width;
+    const double z_end = z_center + transition_width;
+    
+    // Inlet occurs in the transition zone where the step is located
+    return (z >= z_start && z <= z_end);
+}
+
+/**
  * @brief Numerically integrates a radially-symmetric function over a 2D
  * circular domain using the trapezoidal rule in polar coordinates.
  *
@@ -308,7 +323,7 @@ void animate_write(int n, int L_max, int M_max, double dz, double **r,
                    double **e, double **H_z, double **H_r, double **H_phi) {
 
     // Generate filename based on time step
-    char filename[10];
+    char filename[50];
     sprintf(filename, "animate_m_29_800x400/%d.plt", n);
 
     std::ofstream out(filename);
@@ -541,6 +556,10 @@ int main(int argc, char *argv[]) {
 
     int animate = 0; // Animation flag (0 = off, 1 = on)
 
+    // Inlet parameters (for step surface injection)
+    double inlet_velocity = 0.5;  // Radial inlet velocity magnitude
+    double inlet_density = 1.0;   // Inlet density
+    
     // ============================================================================
     // COMPUTATIONAL DOMAIN AND TIME DISCRETIZATION
     // ============================================================================
@@ -692,7 +711,7 @@ int main(int argc, char *argv[]) {
             // Fluid properties
             rho[l][m] = 1.0; // Uniform initial density
             v_z[l][m] = 0.1; // Small initial axial velocity
-            v_r[l][m] = 0.1; // Small initial radial velocity
+            v_r[l][m] = 0.0; // No initial radial velocity
             v_phi[l][m] = 0; // No initial azimuthal velocity
 
             // Magnetic field configuration
@@ -757,7 +776,6 @@ int main(int argc, char *argv[]) {
     conv_file << "# Step Time RelativeChange\n";
 
     // Main time integration loop
-    // while (t < T && !converged) {
     while (!converged) {
 
         // ==========================================================================
@@ -947,23 +965,22 @@ int main(int argc, char *argv[]) {
         }
 
         // ==========================================================================
-        // LEFT BOUNDARY CONDITIONS (z = 0, inlet)
+        // LEFT BOUNDARY CONDITIONS (z = 0) - NOW NO-PENETRATION WALL
         // ==========================================================================
 
 #pragma omp parallel for
         for (int m = 0; m < M_max + 1; m++) {
-            // Fixed inlet conditions
-            rho[0][m] = 1.0; // Constant density
-            v_phi[0][m] = 0; // No swirl at inlet
-            v_z[0][m] = u_2[1][m] /
-                        (rho[0][m] * r[0][m]); // Extrapolated axial velocity
-            v_r[0][m] = 0;                     // No radial velocity at inlet
-            H_phi[0][m] = r_0 / r[0][m];       // Prescribed azimuthal field
-            H_z[0][m] = H_z0;                  // Constant axial field
-            H_r[0][m] = 0;                     // No radial field at inlet
-            // Isentropic relation for energy
-            e[0][m] =
-                beta / (2.0 * (gamma - 1.0)) * pow(rho[0][m], gamma - 1.0);
+            // Wall boundary conditions - no penetration
+            rho[0][m] = rho[1][m];     // Extrapolate density
+            v_z[0][m] = 0.0;           // No axial velocity (wall)
+            v_r[0][m] = 0.0;           // No radial velocity (wall)
+            v_phi[0][m] = v_phi[1][m]; // Extrapolate azimuthal velocity
+            e[0][m] = e[1][m];         // Extrapolate energy
+            
+            // Magnetic field - insulating wall conditions
+            H_phi[0][m] = H_phi[1][m]; // Tangential component continuous
+            H_z[0][m] = H_z[1][m];     // Tangential component continuous  
+            H_r[0][m] = 0.0;           // Normal component zero at wall
         }
 
         // Convert boundary primitives to conservatives
@@ -1012,17 +1029,32 @@ int main(int argc, char *argv[]) {
         // LOWER BOUNDARY CONDITIONS (r = r_min, inner wall/centerline)
         // ==========================================================================
 
-        // Region 1: l <= L_end (standard wall boundary)
+        // Region 1: l <= L_end (standard wall boundary before step)
         for (int l = 1; l <= L_end; l++) {
-            // Zero-gradient extrapolation from interior
-            rho[l][0] = rho[l][1];
-            v_z[l][0] = v_z[l][1];
-            v_r[l][0] = v_z[l][1] * r_z[l][1]; // Tangent flow condition
-            v_phi[l][0] = v_phi[l][1];
-            e[l][0] = e[l][1];
-            H_phi[l][0] = H_phi[l][1];
-            H_z[l][0] = H_z[l][1];
-            H_r[l][0] = H_z[l][1] * r_z[l][1]; // Consistent with geometry
+            // Check if this is in the inlet region (step surface)
+            double z_coord = l * dz;
+            
+            if (is_inlet_region(z_coord)) {
+                // INLET BOUNDARY - Gas injection through step surface
+                rho[l][0] = inlet_density;
+                v_z[l][0] = 0.0;  // Primarily radial injection
+                v_r[l][0] = inlet_velocity;  // Radial inflow
+                v_phi[l][0] = 0.0;  // No swirl at inlet
+                e[l][0] = beta / (2.0 * (gamma - 1.0));  // Fixed energy
+                H_phi[l][0] = r_0 / r[l][0];  // Prescribed azimuthal field
+                H_z[l][0] = H_z0;  // Constant axial field
+                H_r[l][0] = 0.0;  // No radial field component
+            } else {
+                // WALL BOUNDARY - Zero-gradient extrapolation from interior
+                rho[l][0] = rho[l][1];
+                v_z[l][0] = v_z[l][1];
+                v_r[l][0] = v_z[l][1] * r_z[l][1]; // Tangent flow condition
+                v_phi[l][0] = v_phi[l][1];
+                e[l][0] = e[l][1];
+                H_phi[l][0] = H_phi[l][1];
+                H_z[l][0] = H_z[l][1];
+                H_r[l][0] = H_z[l][1] * r_z[l][1]; // Consistent with geometry
+            }
 
             // Convert to conservative variables
             u_1[l][0] = rho[l][0] * r[l][0];
@@ -1297,7 +1329,7 @@ int main(int argc, char *argv[]) {
 
     std::cout << "Writing results to file..." << std::endl;
 
-    std::ofstream out("28-2D_MHD_LF_rzphi_MPD.plt");
+    std::ofstream out("28-2D_MHD_LF_rzphi_MPD_modified.plt");
     int np = (L_max + 1) * (M_max + 1); // Total number of points
     int ne = L_max * M_max;             // Total number of elements
     double hfr;                         // H_phi * r for output
@@ -1335,12 +1367,12 @@ int main(int argc, char *argv[]) {
     }
 
     out.close();
-    std::cout << "Results written to 28-2D_MHD_LF_rzphi_MPD.plt" << std::endl;
+    std::cout << "Results written to 28-2D_MHD_LF_rzphi_MPD_modified.plt" << std::endl;
 
     // Write VTK file for Paraview
-    write_vtk("28-2D_MHD_LF_rzphi_MPD.vtk", L_max, M_max, dz, r, rho, v_z, v_r,
+    write_vtk("28-2D_MHD_LF_rzphi_MPD_modified.vtk", L_max, M_max, dz, r, rho, v_z, v_r,
               v_phi, e, H_z, H_r, H_phi);
-    std::cout << "Results written to 28-2D_MHD_LF_rzphi_MPD.vtk" << std::endl;
+    std::cout << "Results written to 28-2D_MHD_LF_rzphi_MPD_modified.vtk" << std::endl;
 
     // ============================================================================
     // MEMORY CLEANUP
