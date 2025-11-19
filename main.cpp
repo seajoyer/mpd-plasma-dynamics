@@ -1,9 +1,9 @@
-#include<stdio.h>
-#include<iostream>
-#include<fstream>
-#include<cmath>
-#include<omp.h>
-#include<mpi.h>
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <cmath>
+#include <omp.h>
+#include <mpi.h>
 
 double compute_solution_change(double **rho_curr, double **rho_prev,
                                double **v_z_curr, double **v_z_prev,
@@ -309,7 +309,7 @@ int main(int argc, char* argv[]) {
     int check_frequency = 100;
 
     // discrete solution area
-    double T = 10.0;
+    double T = 15.0;
     double t = 0.0;
     double dt = 0.000025;
 
