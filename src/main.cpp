@@ -463,6 +463,37 @@ auto main(int argc, char* argv[]) -> int {
         printf("Output format: %s\n", params.output_format.c_str());
     }
 
+    // Output initial conditions as frame 0 if animation is enabled
+    if (params.animate) {
+        GatherResultsToRank0(fields, grid, domain, params, global_fields_anim,
+                             global_grid_anim);
+
+        if (domain.rank == 0) {
+            std::string filename =
+                GenerateOutputFilename(params.output_format, frame_count);
+
+            if (params.output_format == "vtk") {
+                WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
+                         params.dz, global_grid_anim.r, global_fields_anim.rho,
+                         global_fields_anim.v_z, global_fields_anim.v_r,
+                         global_fields_anim.v_phi, global_fields_anim.e,
+                         global_fields_anim.H_z, global_fields_anim.H_r,
+                         global_fields_anim.H_phi);
+            } else if (params.output_format == "plt") {
+                WritePlt(filename.c_str(), params.L_max_global, params.M_max,
+                         params.dz, global_grid_anim.r, global_fields_anim.rho,
+                         global_fields_anim.v_z, global_fields_anim.v_r,
+                         global_fields_anim.v_phi, global_fields_anim.e,
+                         global_fields_anim.H_z, global_fields_anim.H_r,
+                         global_fields_anim.H_phi);
+            }
+
+            printf("Frame %d written (initial conditions, t=%.6f): %s\n", frame_count,
+                   t, filename.c_str());
+            frame_count++;
+        }
+    }
+
     // Main time loop
     while (t < params.T && !converged) {
         // Exchange ghost cells
