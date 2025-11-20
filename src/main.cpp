@@ -331,6 +331,59 @@ auto main(int argc, char* argv[]) -> int {
     // Initialize conservative variables
     initialize_conservative_vars(u0, fields, grid, domain.local_L_with_ghosts, params.M_max);
 
+    // Initialize ghost cells for boundary ranks before first time step
+    if (domain.rank == 0) {
+        // Copy first physical cell to left ghost cell
+        #pragma omp parallel for
+        for (int m = 0; m < params.M_max + 1; m++) {
+            fields.rho[0][m] = fields.rho[1][m];
+            fields.v_z[0][m] = fields.v_z[1][m];
+            fields.v_r[0][m] = fields.v_r[1][m];
+            fields.v_phi[0][m] = fields.v_phi[1][m];
+            fields.H_phi[0][m] = fields.H_phi[1][m];
+            fields.H_z[0][m] = fields.H_z[1][m];
+            fields.H_r[0][m] = fields.H_r[1][m];
+            fields.e[0][m] = fields.e[1][m];
+            fields.p[0][m] = fields.p[1][m];
+            fields.P[0][m] = fields.P[1][m];
+            
+            u0.u_1[0][m] = fields.rho[0][m] * grid.r[0][m];
+            u0.u_2[0][m] = fields.rho[0][m] * fields.v_z[0][m] * grid.r[0][m];
+            u0.u_3[0][m] = fields.rho[0][m] * fields.v_r[0][m] * grid.r[0][m];
+            u0.u_4[0][m] = fields.rho[0][m] * fields.v_phi[0][m] * grid.r[0][m];
+            u0.u_5[0][m] = fields.rho[0][m] * fields.e[0][m] * grid.r[0][m];
+            u0.u_6[0][m] = fields.H_phi[0][m];
+            u0.u_7[0][m] = fields.H_z[0][m] * grid.r[0][m];
+            u0.u_8[0][m] = fields.H_r[0][m] * grid.r[0][m];
+        }
+    }
+    
+    if (domain.rank == domain.size - 1) {
+        // Copy last physical cell to right ghost cell
+        #pragma omp parallel for
+        for (int m = 0; m < params.M_max + 1; m++) {
+            fields.rho[domain.local_L + 1][m] = fields.rho[domain.local_L][m];
+            fields.v_z[domain.local_L + 1][m] = fields.v_z[domain.local_L][m];
+            fields.v_r[domain.local_L + 1][m] = fields.v_r[domain.local_L][m];
+            fields.v_phi[domain.local_L + 1][m] = fields.v_phi[domain.local_L][m];
+            fields.H_phi[domain.local_L + 1][m] = fields.H_phi[domain.local_L][m];
+            fields.H_z[domain.local_L + 1][m] = fields.H_z[domain.local_L][m];
+            fields.H_r[domain.local_L + 1][m] = fields.H_r[domain.local_L][m];
+            fields.e[domain.local_L + 1][m] = fields.e[domain.local_L][m];
+            fields.p[domain.local_L + 1][m] = fields.p[domain.local_L][m];
+            fields.P[domain.local_L + 1][m] = fields.P[domain.local_L][m];
+            
+            u0.u_1[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_2[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] * fields.v_z[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_3[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] * fields.v_r[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_4[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] * fields.v_phi[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_5[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] * fields.e[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_6[domain.local_L + 1][m] = fields.H_phi[domain.local_L + 1][m];
+            u0.u_7[domain.local_L + 1][m] = fields.H_z[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_8[domain.local_L + 1][m] = fields.H_r[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+        }
+    }
+
     // Start timing
     if (domain.rank == 0) {
         begin = MPI_Wtime();

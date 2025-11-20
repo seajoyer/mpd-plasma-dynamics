@@ -40,6 +40,28 @@ void apply_boundary_conditions(PhysicalFields& fields, ConservativeVars& u,
             u.u_7[1][m] = fields.H_z[1][m] * grid.r[1][m];
             u.u_8[1][m] = fields.H_r[1][m] * grid.r[1][m];
         }
+        
+        // Also update left ghost cell to match boundary
+        #pragma omp parallel for
+        for (int m = 0; m < M_max + 1; m++) {
+            fields.rho[0][m] = fields.rho[1][m];
+            fields.v_z[0][m] = fields.v_z[1][m];
+            fields.v_r[0][m] = fields.v_r[1][m];
+            fields.v_phi[0][m] = fields.v_phi[1][m];
+            fields.H_phi[0][m] = fields.H_phi[1][m];
+            fields.H_z[0][m] = fields.H_z[1][m];
+            fields.H_r[0][m] = fields.H_r[1][m];
+            fields.e[0][m] = fields.e[1][m];
+            
+            u.u_1[0][m] = u.u_1[1][m];
+            u.u_2[0][m] = u.u_2[1][m];
+            u.u_3[0][m] = u.u_3[1][m];
+            u.u_4[0][m] = u.u_4[1][m];
+            u.u_5[0][m] = u.u_5[1][m];
+            u.u_6[0][m] = u.u_6[1][m];
+            u.u_7[0][m] = u.u_7[1][m];
+            u.u_8[0][m] = u.u_8[1][m];
+        }
     }
 
     // Up boundary condition
@@ -167,6 +189,28 @@ void apply_boundary_conditions(PhysicalFields& fields, ConservativeVars& u,
             u.u_6[local_L][m] = u.u_6[local_L - 1][m];
             u.u_7[local_L][m] = u.u_7[local_L - 1][m];
             u.u_8[local_L][m] = u.u_8[local_L - 1][m];
+        }
+        
+        // Also update right ghost cell to match boundary
+        #pragma omp parallel for
+        for (int m = 0; m < M_max + 1; m++) {
+            u.u_1[local_L + 1][m] = u.u_1[local_L][m];
+            u.u_2[local_L + 1][m] = u.u_2[local_L][m];
+            u.u_3[local_L + 1][m] = u.u_3[local_L][m];
+            u.u_4[local_L + 1][m] = u.u_4[local_L][m];
+            u.u_5[local_L + 1][m] = u.u_5[local_L][m];
+            u.u_6[local_L + 1][m] = u.u_6[local_L][m];
+            u.u_7[local_L + 1][m] = u.u_7[local_L][m];
+            u.u_8[local_L + 1][m] = u.u_8[local_L][m];
+            
+            fields.rho[local_L + 1][m] = fields.rho[local_L][m];
+            fields.v_z[local_L + 1][m] = fields.v_z[local_L][m];
+            fields.v_r[local_L + 1][m] = fields.v_r[local_L][m];
+            fields.v_phi[local_L + 1][m] = fields.v_phi[local_L][m];
+            fields.H_phi[local_L + 1][m] = fields.H_phi[local_L][m];
+            fields.H_z[local_L + 1][m] = fields.H_z[local_L][m];
+            fields.H_r[local_L + 1][m] = fields.H_r[local_L][m];
+            fields.e[local_L + 1][m] = fields.e[local_L][m];
         }
     }
 }

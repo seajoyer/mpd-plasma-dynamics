@@ -98,16 +98,20 @@ void update_physical_fields(PhysicalFields& fields, const ConservativeVars& u,
     #pragma omp parallel for collapse(2)
     for (int l = 1; l < local_L_with_ghosts - 1; l++) {
         for (int m = 0; m < M_max + 1; m++) {
-            fields.rho[l][m] = u.u_1[l][m] / grid.r[l][m];
-            fields.v_z[l][m] = u.u_2[l][m] / u.u_1[l][m];
-            fields.v_r[l][m] = u.u_3[l][m] / u.u_1[l][m];
-            fields.v_phi[l][m] = u.u_4[l][m] / u.u_1[l][m];
+            // Prevent division by zero
+            double u1_safe = (std::abs(u.u_1[l][m]) < 1e-15) ? 1e-15 : u.u_1[l][m];
+            double r_safe = (std::abs(grid.r[l][m]) < 1e-15) ? 1e-15 : grid.r[l][m];
+            
+            fields.rho[l][m] = u.u_1[l][m] / r_safe;
+            fields.v_z[l][m] = u.u_2[l][m] / u1_safe;
+            fields.v_r[l][m] = u.u_3[l][m] / u1_safe;
+            fields.v_phi[l][m] = u.u_4[l][m] / u1_safe;
 
             fields.H_phi[l][m] = u.u_6[l][m];
-            fields.H_z[l][m] = u.u_7[l][m] / grid.r[l][m];
-            fields.H_r[l][m] = u.u_8[l][m] / grid.r[l][m];
+            fields.H_z[l][m] = u.u_7[l][m] / r_safe;
+            fields.H_r[l][m] = u.u_8[l][m] / r_safe;
 
-            fields.e[l][m] = u.u_5[l][m] / u.u_1[l][m];
+            fields.e[l][m] = u.u_5[l][m] / u1_safe;
             fields.p[l][m] = (gamma - 1) * fields.rho[l][m] * fields.e[l][m];
             fields.P[l][m] = fields.p[l][m] + 0.5 * (pow(fields.H_z[l][m], 2) + 
                                                       pow(fields.H_r[l][m], 2) + 
