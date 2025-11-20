@@ -234,7 +234,7 @@ auto main(int argc, char* argv[]) -> int {
     params.convergence_threshold = 0.0;
     params.check_frequency = 100;
 
-    params.T = 0.1;
+    params.T = 15.0;
     params.dt = 0.000025;
 
     params.L_max_global = 800;

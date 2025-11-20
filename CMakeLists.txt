@@ -10,11 +10,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(MPI REQUIRED COMPONENTS CXX)
 
-# Help CMake find LLVM's OpenMP
-set(OpenMP_CXX_FLAGS "-fopenmp=libomp")
-set(OpenMP_CXX_LIB_NAMES "omp")
-set(OpenMP_omp_LIBRARY "$ENV{OpenMP_omp_LIBRARY}")
-
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
 # Create executable

@@ -24,7 +24,7 @@ echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
 echo "Date: $(date)"
 echo "======================"
 
-mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --animate --anim-freq 100 --format vtk
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --animate --anim-freq 20000 --format vtk
 
 # mpirun -np ${SLURM_NTASKS} --bind-to none ./build/mpd-plasma-dynamics ${OMP_NUM_THREADS} --converge 1e-6 --animate --anim-freq 100 --format vtk
 

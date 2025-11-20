@@ -2,6 +2,8 @@
 .cache
 *.log
 .envrc
-build/*
-results/*
-# flake.lock
+build/
+results/
+flake.lock
+output/
+log/
