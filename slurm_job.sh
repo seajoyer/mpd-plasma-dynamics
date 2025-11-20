@@ -10,8 +10,8 @@
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export OMP_PLACES=cores
-export OMP_PROC_BIND=close           # FIXED: was 'false', now 'close' for better performance
-export OMP_WAIT_POLICY=active        # Reduce latency in critical sections
+export OMP_PROC_BIND=close
+export OMP_WAIT_POLICY=active
 
 echo "=== SLURM Debug Info ==="
 echo "SLURM_NTASKS: ${SLURM_NTASKS}"
@@ -24,7 +24,9 @@ echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
 echo "Date: $(date)"
 echo "======================"
 
-mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}"
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --animate --anim-freq 100 --format vtk
+
+# mpirun -np ${SLURM_NTASKS} --bind-to none ./build/mpd-plasma-dynamics ${OMP_NUM_THREADS} --converge 1e-6 --animate --anim-freq 100 --format vtk
 
 # Job summary
 echo "Job completed at $(date)"

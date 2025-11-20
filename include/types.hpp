@@ -7,7 +7,8 @@ struct SimulationParams {
     double gamma;           // Adiabatic index
     double beta;            // Plasma beta
     double H_z0;            // Initial magnetic field in z-direction
-    int animate;            // Animation flag
+    int animate;            // Animation flag (0=off, 1=on)
+    int animation_frequency; // Output every N steps
     std::string output_format;  // vtk or plt
     
     double convergence_threshold;
