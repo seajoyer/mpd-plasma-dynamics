@@ -5,6 +5,37 @@
 #include <omp.h>
 #include <mpi.h>
 
+double compute_max_wave_speed(double **rho, double **v_z, double **v_r, double **v_phi,
+                              double **H_z, double **H_r, double **H_phi, double **p,
+                              int local_L, int M_max, double gamma) {
+    double max_speed = 0.0;
+    
+    #pragma omp parallel for collapse(2) reduction(max:max_speed)
+    for (int l = 1; l < local_L + 1; l++) {
+        for (int m = 0; m < M_max + 1; m++) {
+            // Sound speed
+            double cs = std::sqrt(gamma * p[l][m] / rho[l][m]);
+            
+            // Alfven speed (fast magnetosonic)
+            double ca = std::sqrt((H_z[l][m]*H_z[l][m] + H_r[l][m]*H_r[l][m] + 
+                                   H_phi[l][m]*H_phi[l][m]) / rho[l][m]);
+            
+            // Flow speed
+            double v = std::sqrt(v_z[l][m]*v_z[l][m] + v_r[l][m]*v_r[l][m]);
+            
+            // Maximum characteristic speed (fast magnetosonic wave)
+            double local_speed = v + cs + ca;
+            max_speed = std::max(max_speed, local_speed);
+        }
+    }
+    
+    // Find global maximum across all processes
+    double global_max_speed;
+    MPI_Allreduce(&max_speed, &global_max_speed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    
+    return global_max_speed;
+}
+
 double compute_solution_change(double **rho_curr, double **rho_prev,
                                double **v_z_curr, double **v_z_prev,
                                double **v_r_curr, double **v_r_prev,
@@ -63,9 +94,29 @@ double compute_solution_change(double **rho_curr, double **rho_prev,
 }
 
 void memory_allocation_2D(double** &array, int rows, int columns) {
-	array = new double* [rows];
+	array = new (std::nothrow) double*[rows];
+	if (!array) {
+		int rank = 0;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		fprintf(stderr, "FATAL ERROR on rank %d: Failed to allocate %d row pointers\n", rank, rows);
+		MPI_Abort(MPI_COMM_WORLD, 1);
+	}
+	
     for (int i = 0; i < rows; i++) {
-        array[i] = new double[columns];
+        array[i] = new (std::nothrow) double[columns];
+        if (!array[i]) {
+			int rank = 0;
+			MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+			fprintf(stderr, "FATAL ERROR on rank %d: Failed to allocate row %d/%d (columns=%d)\n", 
+			        rank, i, rows, columns);
+			// Clean up previously allocated rows
+			for (int j = 0; j < i; j++) {
+				delete[] array[j];
+			}
+			delete[] array;
+			MPI_Abort(MPI_COMM_WORLD, 1);
+		}
+        
         for (int j = 0; j < columns; j++) {
             array[i][j] = 0;
         }
@@ -309,7 +360,7 @@ int main(int argc, char* argv[]) {
     int check_frequency = 100;
 
     // discrete solution area
-    double T = 15.0;
+    double T = 0.1;
     double t = 0.0;
     double dt = 0.000025;
 
@@ -322,7 +373,6 @@ int main(int argc, char* argv[]) {
 
 	// Domain decomposition in z-direction (l-direction)
 	int L_per_proc = L_max_global / size;
-	int L_remainder = L_max_global % size;
 	
 	// Each process gets L_per_proc cells, last process gets remainder
 	int l_start = rank * L_per_proc;
@@ -871,6 +921,21 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // CFL stability check (every 100 steps)
+        if (step_count % 100 == 0) {
+            double max_wave_speed = compute_max_wave_speed(rho, v_z, v_r, v_phi, 
+                                                           H_z, H_r, H_phi, p,
+                                                           local_L, M_max, gamma);
+            double dx = std::min(dz, dy);
+            double CFL_number = 0.5;  // Typical CFL for stability
+            double dt_max = CFL_number * dx / (max_wave_speed + 1e-10);
+            
+            if (dt > dt_max && rank == 0 && step_count % 1000 == 0) {
+                printf("WARNING: dt=%.6e exceeds CFL limit dt_max=%.6e (max_speed=%.3f)\n", 
+                       dt, dt_max, max_wave_speed);
+            }
+        }
+
 		// animation output
         if ((int)(t * 10000) % 1000 == 0 && animate == 1) {
             animate_write((int)(t * 10000), local_L, M_max, dz, r, rho, v_z, v_r, v_phi, 
@@ -908,15 +973,15 @@ int main(int argc, char* argv[]) {
 	double **r_global = nullptr;
 	
 	if (rank == 0) {
-		memory_allocation_2D(rho_global, L_max_global, M_max + 1);
-		memory_allocation_2D(v_z_global, L_max_global, M_max + 1);
-		memory_allocation_2D(v_r_global, L_max_global, M_max + 1);
-		memory_allocation_2D(v_phi_global, L_max_global, M_max + 1);
-		memory_allocation_2D(e_global, L_max_global, M_max + 1);
-		memory_allocation_2D(H_z_global, L_max_global, M_max + 1);
-		memory_allocation_2D(H_r_global, L_max_global, M_max + 1);
-		memory_allocation_2D(H_phi_global, L_max_global, M_max + 1);
-		memory_allocation_2D(r_global, L_max_global, M_max + 1);
+		memory_allocation_2D(rho_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(v_z_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(v_r_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(v_phi_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(e_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(H_z_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(H_r_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(H_phi_global, L_max_global + 1, M_max + 1);
+		memory_allocation_2D(r_global, L_max_global + 1, M_max + 1);
 	}
 
 	// Gather data row by row (excluding ghost cells)
@@ -1023,17 +1088,6 @@ int main(int argc, char* argv[]) {
 		write_vtk("output_MHD.vtk", L_max_global, M_max, dz,
 		              r_global, rho_global, v_z_global, v_r_global,
 		              v_phi_global, e_global, H_z_global, H_r_global, H_phi_global);
-
-		// Clear global memory
-		memory_clearing_2D(rho_global, L_max_global);
-		memory_clearing_2D(v_z_global, L_max_global);
-		memory_clearing_2D(v_r_global, L_max_global);
-		memory_clearing_2D(v_phi_global, L_max_global);
-		memory_clearing_2D(e_global, L_max_global);
-		memory_clearing_2D(H_z_global, L_max_global);
-		memory_clearing_2D(H_r_global, L_max_global);
-		memory_clearing_2D(H_phi_global, L_max_global);
-		memory_clearing_2D(r_global, L_max_global);
 	}
 
 	// output results in file (only rank 0)
@@ -1079,7 +1133,7 @@ int main(int argc, char* argv[]) {
 
 		out.close();
 
-		// clear global memory
+		// clear global memory (now with correct size)
 		memory_clearing_2D(rho_global, L_max_global + 1);
 		memory_clearing_2D(v_z_global, L_max_global + 1);
 		memory_clearing_2D(v_r_global, L_max_global + 1);
