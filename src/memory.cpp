@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <mpi.h>
 
-void memory_allocation_2D(double** &array, int rows, int columns) {
+void MemoryAllocation2D(double** &array, int rows, int columns) {
     array = new (std::nothrow) double*[rows];
     if (!array) {
         int rank = 0;
@@ -34,7 +34,7 @@ void memory_allocation_2D(double** &array, int rows, int columns) {
     }
 }
 
-void memory_clearing_2D(double** &array, int rows) {
+void MemoryClearing2D(double** &array, int rows) {
     for (int i = 0; i < rows; i++) {
         delete[] array[i];
     }

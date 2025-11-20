@@ -1,7 +1,7 @@
 #pragma once
 
 // Domain boundary functions
-double r1(double z);
-double r2(double z);
-double der_r1(double z);
-double der_r2(double z);
+auto R1(double z) -> double;
+auto R2(double z) -> double;
+auto DerR1(double z) -> double;
+auto DerR2(double z) -> double;

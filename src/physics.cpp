@@ -4,9 +4,9 @@
 #include <omp.h>
 #include <mpi.h>
 
-double compute_max_wave_speed(double **rho, double **v_z, double **v_r, double **v_phi,
+auto ComputeMaxWaveSpeed(double **rho, double **v_z, double **v_r, double **v_phi,
                                double **H_z, double **H_r, double **H_phi, double **p,
-                               int local_L, int M_max, double gamma) {
+                               int local_L, int M_max, double gamma) -> double {
     double max_speed = 0.0;
     
     #pragma omp parallel for collapse(2) reduction(max:max_speed)
@@ -35,14 +35,14 @@ double compute_max_wave_speed(double **rho, double **v_z, double **v_r, double *
     return global_max_speed;
 }
 
-double compute_solution_change(double **rho_curr, double **rho_prev,
+auto ComputeSolutionChange(double **rho_curr, double **rho_prev,
                                 double **v_z_curr, double **v_z_prev,
                                 double **v_r_curr, double **v_r_prev,
                                 double **v_phi_curr, double **v_phi_prev,
                                 double **H_z_curr, double **H_z_prev,
                                 double **H_r_curr, double **H_r_prev,
                                 double **H_phi_curr, double **H_phi_prev,
-                                int local_L, int M_max) {
+                                int local_L, int M_max) -> double {
 
     double sum_sq_diff = 0.0;
     double sum_sq_curr = 0.0;
@@ -92,7 +92,7 @@ double compute_solution_change(double **rho_curr, double **rho_prev,
     return norm_diff;
 }
 
-double max_array(double **array, int L, int M) {
+auto MaxArray(double **array, int L, int M) -> double {
     double maxim = 0.0;
 
     for (int l = 0; l < L + 1; l++) {

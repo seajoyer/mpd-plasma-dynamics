@@ -2,10 +2,10 @@
 #include <mpi.h>
 
 static void exchange_variable(double **var, const DomainInfo& domain, int M_max) {
-    double *send_left = new double[M_max + 1];
-    double *send_right = new double[M_max + 1];
-    double *recv_left = new double[M_max + 1];
-    double *recv_right = new double[M_max + 1];
+    auto *send_left = new double[M_max + 1];
+    auto *send_right = new double[M_max + 1];
+    auto *recv_left = new double[M_max + 1];
+    auto *recv_right = new double[M_max + 1];
     
     for (int m = 0; m < M_max + 1; m++) {
         send_left[m] = var[1][m];
@@ -47,7 +47,7 @@ static void exchange_variable(double **var, const DomainInfo& domain, int M_max)
     delete[] recv_right;
 }
 
-void exchange_ghost_cells_conservative(ConservativeVars& u0, const DomainInfo& domain, int M_max) {
+void ExchangeGhostCellsConservative(ConservativeVars& u0, const DomainInfo& domain, int M_max) {
     exchange_variable(u0.u_1, domain, M_max);
     exchange_variable(u0.u_2, domain, M_max);
     exchange_variable(u0.u_3, domain, M_max);
@@ -58,7 +58,7 @@ void exchange_ghost_cells_conservative(ConservativeVars& u0, const DomainInfo& d
     exchange_variable(u0.u_8, domain, M_max);
 }
 
-void exchange_ghost_cells_physical(PhysicalFields& fields, const DomainInfo& domain, int M_max) {
+void ExchangeGhostCellsPhysical(PhysicalFields& fields, const DomainInfo& domain, int M_max) {
     exchange_variable(fields.rho, domain, M_max);
     exchange_variable(fields.v_z, domain, M_max);
     exchange_variable(fields.v_r, domain, M_max);

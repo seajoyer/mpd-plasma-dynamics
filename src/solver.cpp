@@ -2,7 +2,7 @@
 #include <cmath>
 #include <omp.h>
 
-void initialize_conservative_vars(ConservativeVars& u0, const PhysicalFields& fields,
+void InitializeConservativeVars(ConservativeVars& u0, const PhysicalFields& fields,
                                   const GridGeometry& grid, int local_L_with_ghosts, int M_max) {
     #pragma omp parallel for collapse(2)
     for (int l = 1; l < local_L_with_ghosts - 1; l++) {
@@ -19,7 +19,7 @@ void initialize_conservative_vars(ConservativeVars& u0, const PhysicalFields& fi
     }
 }
 
-void compute_time_step(ConservativeVars& u, const ConservativeVars& u0,
+void ComputeTimeStep(ConservativeVars& u, const ConservativeVars& u0,
                       const PhysicalFields& fields, const GridGeometry& grid,
                       const DomainInfo& domain, const SimulationParams& params) {
     
@@ -92,7 +92,7 @@ void compute_time_step(ConservativeVars& u, const ConservativeVars& u0,
     }
 }
 
-void update_physical_fields(PhysicalFields& fields, const ConservativeVars& u,
+void UpdatePhysicalFields(PhysicalFields& fields, const ConservativeVars& u,
                            const GridGeometry& grid, int local_L_with_ghosts, int M_max,
                            double gamma) {
     #pragma omp parallel for collapse(2)
@@ -120,7 +120,7 @@ void update_physical_fields(PhysicalFields& fields, const ConservativeVars& u,
     }
 }
 
-void copy_conservative_vars(ConservativeVars& u0, const ConservativeVars& u,
+void CopyConservativeVars(ConservativeVars& u0, const ConservativeVars& u,
                            int local_L_with_ghosts, int M_max) {
     #pragma omp parallel for collapse(2)
     for (int l = 0; l < local_L_with_ghosts; l++) {

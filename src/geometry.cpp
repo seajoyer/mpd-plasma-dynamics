@@ -1,7 +1,7 @@
 #include "geometry.hpp"
 #include <cmath>
 
-double r1(double z) {
+auto R1(double z) -> double {
     if (z < 0.3) {
         return 0.2;
     } else if (z >= 0.3 && z < 0.4) {
@@ -13,11 +13,11 @@ double r1(double z) {
     }
 }
 
-double r2(double z) {
+auto R2(double z) -> double {
     return 0.8;
 }
 
-double der_r1(double z) {
+auto DerR1(double z) -> double {
     if (z < 0.3) {
         return 0.0;
     } else if (z >= 0.3 && z < 0.4) {
@@ -29,6 +29,6 @@ double der_r1(double z) {
     }
 }
 
-double der_r2(double z) {
+auto DerR2(double z) -> double {
     return 0.0;
 }

@@ -29,71 +29,71 @@ auto GenerateOutputFilename(const std::string& format, int frame_number) -> std:
 
 // Helper function to allocate all field arrays
 void AllocateFields(PhysicalFields& fields, int rows, int cols) {
-    memory_allocation_2D(fields.rho, rows, cols);
-    memory_allocation_2D(fields.v_r, rows, cols);
-    memory_allocation_2D(fields.v_phi, rows, cols);
-    memory_allocation_2D(fields.v_z, rows, cols);
-    memory_allocation_2D(fields.e, rows, cols);
-    memory_allocation_2D(fields.p, rows, cols);
-    memory_allocation_2D(fields.P, rows, cols);
-    memory_allocation_2D(fields.H_r, rows, cols);
-    memory_allocation_2D(fields.H_phi, rows, cols);
-    memory_allocation_2D(fields.H_z, rows, cols);
+    MemoryAllocation2D(fields.rho, rows, cols);
+    MemoryAllocation2D(fields.v_r, rows, cols);
+    MemoryAllocation2D(fields.v_phi, rows, cols);
+    MemoryAllocation2D(fields.v_z, rows, cols);
+    MemoryAllocation2D(fields.e, rows, cols);
+    MemoryAllocation2D(fields.p, rows, cols);
+    MemoryAllocation2D(fields.P, rows, cols);
+    MemoryAllocation2D(fields.H_r, rows, cols);
+    MemoryAllocation2D(fields.H_phi, rows, cols);
+    MemoryAllocation2D(fields.H_z, rows, cols);
 }
 
 void DeallocateFields(PhysicalFields& fields, int rows) {
-    memory_clearing_2D(fields.rho, rows);
-    memory_clearing_2D(fields.v_r, rows);
-    memory_clearing_2D(fields.v_phi, rows);
-    memory_clearing_2D(fields.v_z, rows);
-    memory_clearing_2D(fields.e, rows);
-    memory_clearing_2D(fields.p, rows);
-    memory_clearing_2D(fields.P, rows);
-    memory_clearing_2D(fields.H_r, rows);
-    memory_clearing_2D(fields.H_phi, rows);
-    memory_clearing_2D(fields.H_z, rows);
+    MemoryClearing2D(fields.rho, rows);
+    MemoryClearing2D(fields.v_r, rows);
+    MemoryClearing2D(fields.v_phi, rows);
+    MemoryClearing2D(fields.v_z, rows);
+    MemoryClearing2D(fields.e, rows);
+    MemoryClearing2D(fields.p, rows);
+    MemoryClearing2D(fields.P, rows);
+    MemoryClearing2D(fields.H_r, rows);
+    MemoryClearing2D(fields.H_phi, rows);
+    MemoryClearing2D(fields.H_z, rows);
 }
 
 void AllocateConservative(ConservativeVars& u, int rows, int cols) {
-    memory_allocation_2D(u.u_1, rows, cols);
-    memory_allocation_2D(u.u_2, rows, cols);
-    memory_allocation_2D(u.u_3, rows, cols);
-    memory_allocation_2D(u.u_4, rows, cols);
-    memory_allocation_2D(u.u_5, rows, cols);
-    memory_allocation_2D(u.u_6, rows, cols);
-    memory_allocation_2D(u.u_7, rows, cols);
-    memory_allocation_2D(u.u_8, rows, cols);
+    MemoryAllocation2D(u.u_1, rows, cols);
+    MemoryAllocation2D(u.u_2, rows, cols);
+    MemoryAllocation2D(u.u_3, rows, cols);
+    MemoryAllocation2D(u.u_4, rows, cols);
+    MemoryAllocation2D(u.u_5, rows, cols);
+    MemoryAllocation2D(u.u_6, rows, cols);
+    MemoryAllocation2D(u.u_7, rows, cols);
+    MemoryAllocation2D(u.u_8, rows, cols);
 }
 
 void DeallocateConservative(ConservativeVars& u, int rows) {
-    memory_clearing_2D(u.u_1, rows);
-    memory_clearing_2D(u.u_2, rows);
-    memory_clearing_2D(u.u_3, rows);
-    memory_clearing_2D(u.u_4, rows);
-    memory_clearing_2D(u.u_5, rows);
-    memory_clearing_2D(u.u_6, rows);
-    memory_clearing_2D(u.u_7, rows);
-    memory_clearing_2D(u.u_8, rows);
+    MemoryClearing2D(u.u_1, rows);
+    MemoryClearing2D(u.u_2, rows);
+    MemoryClearing2D(u.u_3, rows);
+    MemoryClearing2D(u.u_4, rows);
+    MemoryClearing2D(u.u_5, rows);
+    MemoryClearing2D(u.u_6, rows);
+    MemoryClearing2D(u.u_7, rows);
+    MemoryClearing2D(u.u_8, rows);
 }
 
 void AllocatePreviousState(PreviousState& prev, int rows, int cols) {
-    memory_allocation_2D(prev.rho_prev, rows, cols);
-    memory_allocation_2D(prev.v_z_prev, rows, cols);
-    memory_allocation_2D(prev.v_r_prev, rows, cols);
-    memory_allocation_2D(prev.v_phi_prev, rows, cols);
-    memory_allocation_2D(prev.H_z_prev, rows, cols);
-    memory_allocation_2D(prev.H_r_prev, rows, cols);
-    memory_allocation_2D(prev.H_phi_prev, rows, cols);
+    MemoryAllocation2D(prev.rho_prev, rows, cols);
+    MemoryAllocation2D(prev.v_z_prev, rows, cols);
+    MemoryAllocation2D(prev.v_r_prev, rows, cols);
+    MemoryAllocation2D(prev.v_phi_prev, rows, cols);
+    MemoryAllocation2D(prev.H_z_prev, rows, cols);
+    MemoryAllocation2D(prev.H_r_prev, rows, cols);
+    MemoryAllocation2D(prev.H_phi_prev, rows, cols);
 }
 
 void DeallocatePreviousState(PreviousState& prev, int rows) {
-    memory_clearing_2D(prev.rho_prev, rows);
-    memory_clearing_2D(prev.v_z_prev, rows);
-    memory_clearing_2D(prev.v_r_prev, rows);
-    memory_clearing_2D(prev.v_phi_prev, rows);
-    memory_clearing_2D(prev.H_z_prev, rows);
-    memory_clearing_2D(prev.H_r_prev, rows);
-    memory_clearing_2D(prev.H_phi_prev, rows);
+    MemoryClearing2D(prev.rho_prev, rows);
+    MemoryClearing2D(prev.v_z_prev, rows);
+    MemoryClearing2D(prev.v_r_prev, rows);
+    MemoryClearing2D(prev.v_phi_prev, rows);
+    MemoryClearing2D(prev.H_z_prev, rows);
+    MemoryClearing2D(prev.H_r_prev, rows);
+    MemoryClearing2D(prev.H_phi_prev, rows);
 }
 
 void GatherResultsToRank0(const PhysicalFields& fields, const GridGeometry& grid,
@@ -302,8 +302,8 @@ auto main(int argc, char* argv[]) -> int {
     AllocateConservative(u, domain.local_L_with_ghosts, params.M_max + 1);
     AllocateConservative(u0, domain.local_L_with_ghosts, params.M_max + 1);
 
-    memory_allocation_2D(grid.r, domain.local_L_with_ghosts, params.M_max + 1);
-    memory_allocation_2D(grid.r_z, domain.local_L_with_ghosts, params.M_max + 1);
+    MemoryAllocation2D(grid.r, domain.local_L_with_ghosts, params.M_max + 1);
+    MemoryAllocation2D(grid.r_z, domain.local_L_with_ghosts, params.M_max + 1);
     grid.R = new double[domain.local_L_with_ghosts];
     grid.dr = new double[domain.local_L_with_ghosts];
 
@@ -318,18 +318,18 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // Initialize grid geometry
-    double r_0 = (r1(0) + r2(0)) / 2.0;
+    double r_0 = (R1(0) + R2(0)) / 2.0;
 
     for (int l = 0; l < domain.local_L_with_ghosts; l++) {
         int l_global = domain.l_start + l - 1;
         double z = l_global * params.dz;
 
-        grid.R[l] = r2(z) - r1(z);
+        grid.R[l] = R2(z) - R1(z);
         grid.dr[l] = grid.R[l] / params.M_max;
 
         for (int m = 0; m < params.M_max + 1; m++) {
-            grid.r[l][m] = (1 - m * params.dy) * r1(z) + m * params.dy * r2(z);
-            grid.r_z[l][m] = (1 - m * params.dy) * der_r1(z) + m * params.dy * der_r2(z);
+            grid.r[l][m] = (1 - m * params.dy) * R1(z) + m * params.dy * R2(z);
+            grid.r_z[l][m] = (1 - m * params.dy) * DerR1(z) + m * params.dy * DerR2(z);
         }
     }
 
@@ -372,7 +372,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // Initialize conservative variables
-    initialize_conservative_vars(u0, fields, grid, domain.local_L_with_ghosts,
+    InitializeConservativeVars(u0, fields, grid, domain.local_L_with_ghosts,
                                  params.M_max);
 
     // Initialize ghost cells for boundary ranks before first time step
@@ -455,7 +455,7 @@ auto main(int argc, char* argv[]) -> int {
 
     if (domain.rank == 0 && params.animate) {
         AllocateFields(global_fields_anim, params.L_max_global + 1, params.M_max + 1);
-        memory_allocation_2D(global_grid_anim.r, params.L_max_global + 1,
+        MemoryAllocation2D(global_grid_anim.r, params.L_max_global + 1,
                              params.M_max + 1);
 
         printf("Animation enabled: will output every %d steps\n",
@@ -501,26 +501,26 @@ auto main(int argc, char* argv[]) -> int {
         exchange_ghost_cells_physical(fields, domain, params.M_max);
 
         // Compute one time step
-        compute_time_step(u, u0, fields, grid, domain, params);
+        ComputeTimeStep(u, u0, fields, grid, domain, params);
 
         // Update central part
-        update_physical_fields(fields, u, grid, domain.local_L + 2, params.M_max,
+        UpdatePhysicalFields(fields, u, grid, domain.local_L + 2, params.M_max,
                                params.gamma);
 
         // Apply boundary conditions
-        apply_boundary_conditions(fields, u, grid, domain, params, r_0);
+        ApplyBoundaryConditions(fields, u, grid, domain, params, r_0);
 
         // Data update
-        update_physical_fields(fields, u, grid, domain.local_L_with_ghosts, params.M_max,
+        UpdatePhysicalFields(fields, u, grid, domain.local_L_with_ghosts, params.M_max,
                                params.gamma);
 
         // Copy u to u0
-        copy_conservative_vars(u0, u, domain.local_L_with_ghosts, params.M_max);
+        CopyConservativeVars(u0, u, domain.local_L_with_ghosts, params.M_max);
 
         // Convergence check
         if (params.convergence_threshold > 0 &&
             step_count % params.check_frequency == 0) {
-            double change = compute_solution_change(
+            double change = ComputeSolutionChange(
                 fields.rho, prev_state.rho_prev, fields.v_z, prev_state.v_z_prev,
                 fields.v_r, prev_state.v_r_prev, fields.v_phi, prev_state.v_phi_prev,
                 fields.H_z, prev_state.H_z_prev, fields.H_r, prev_state.H_r_prev,
@@ -554,7 +554,7 @@ auto main(int argc, char* argv[]) -> int {
 
         // CFL stability check (every 100 steps)
         if (step_count % 100 == 0) {
-            double max_wave_speed = compute_max_wave_speed(
+            double max_wave_speed = ComputeMaxWaveSpeed(
                 fields.rho, fields.v_z, fields.v_r, fields.v_phi, fields.H_z, fields.H_r,
                 fields.H_phi, fields.p, domain.local_L, params.M_max, params.gamma);
             double dx = std::min(params.dz, params.dy);
@@ -637,7 +637,7 @@ auto main(int argc, char* argv[]) -> int {
 
         if (domain.rank == 0) {
             AllocateFields(global_fields, params.L_max_global + 1, params.M_max + 1);
-            memory_allocation_2D(global_grid.r, params.L_max_global + 1,
+            MemoryAllocation2D(global_grid.r, params.L_max_global + 1,
                                  params.M_max + 1);
         }
 
@@ -664,7 +664,7 @@ auto main(int argc, char* argv[]) -> int {
 
             // Clean up global arrays
             DeallocateFields(global_fields, params.L_max_global + 1);
-            memory_clearing_2D(global_grid.r, params.L_max_global + 1);
+            MemoryClearing2D(global_grid.r, params.L_max_global + 1);
         }
     } else {
         // In animation mode, write one final frame at the end if not already written
@@ -700,7 +700,7 @@ auto main(int argc, char* argv[]) -> int {
         // Clean up animation global arrays
         if (domain.rank == 0) {
             DeallocateFields(global_fields_anim, params.L_max_global + 1);
-            memory_clearing_2D(global_grid_anim.r, params.L_max_global + 1);
+            MemoryClearing2D(global_grid_anim.r, params.L_max_global + 1);
         }
     }
 
@@ -709,8 +709,8 @@ auto main(int argc, char* argv[]) -> int {
     DeallocateConservative(u, domain.local_L_with_ghosts);
     DeallocateConservative(u0, domain.local_L_with_ghosts);
 
-    memory_clearing_2D(grid.r, domain.local_L_with_ghosts);
-    memory_clearing_2D(grid.r_z, domain.local_L_with_ghosts);
+    MemoryClearing2D(grid.r, domain.local_L_with_ghosts);
+    MemoryClearing2D(grid.r_z, domain.local_L_with_ghosts);
     delete[] grid.R;
     delete[] grid.dr;
 
