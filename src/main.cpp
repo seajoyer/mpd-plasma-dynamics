@@ -231,8 +231,8 @@ auto main(int argc, char* argv[]) -> int {
     params.animation_frequency = 100;
     params.output_format = "vtk";
 
-    params.convergence_threshold = 0.0;
-    params.check_frequency = 100;
+    params.convergence_threshold = 1e-5;
+    params.check_frequency = 2000;
 
     params.T = 15.0;
     params.dt = 0.000025;
@@ -497,8 +497,8 @@ auto main(int argc, char* argv[]) -> int {
     // Main time loop
     while (t < params.T && !converged) {
         // Exchange ghost cells
-        exchange_ghost_cells_conservative(u0, domain, params.M_max);
-        exchange_ghost_cells_physical(fields, domain, params.M_max);
+        ExchangeGhostCellsConservative(u0, domain, params.M_max);
+        ExchangeGhostCellsPhysical(fields, domain, params.M_max);
 
         // Compute one time step
         ComputeTimeStep(u, u0, fields, grid, domain, params);
