@@ -4,3 +4,4 @@
 .envrc
 build/*
 results/*
+# flake.lock

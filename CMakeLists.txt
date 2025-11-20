@@ -1,25 +1,46 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(CMAKE_C_COMPILER gcc)
-set(CMAKE_CXX_COMPILER g++)
-
-project(mpd-plasma-dynamics LANGUAGES CXX)
+set(NAME mpd-plasma-dynamics)
+project(${NAME} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(MPI REQUIRED COMPONENTS CXX)
+
+# Help CMake find LLVM's OpenMP
+set(OpenMP_CXX_FLAGS "-fopenmp=libomp")
+set(OpenMP_CXX_LIB_NAMES "omp")
+set(OpenMP_omp_LIBRARY "$ENV{OpenMP_omp_LIBRARY}")
+
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
-add_executable(${PROJECT_NAME} main.cpp)
+# Create executable
+add_executable(${NAME}
+    src/main.cpp
+    src/memory.cpp
+    src/geometry.cpp
+    src/physics.cpp
+    src/mpi_comm.cpp
+    src/output/write_vtk.cpp
+    src/output/write_plt.cpp
+    src/boundary.cpp
+    src/solver.cpp
+)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE 
+target_include_directories(${NAME}
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(${NAME} PRIVATE 
     MPI::MPI_CXX 
     OpenMP::OpenMP_CXX
 )
 
-target_compile_options(${PROJECT_NAME} PRIVATE 
+target_compile_options(${NAME} PRIVATE 
     -Wall -Wextra -Wpedantic -O3
 )
 

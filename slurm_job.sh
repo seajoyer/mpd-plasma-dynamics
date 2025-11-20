@@ -24,7 +24,7 @@ echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
 echo "Date: $(date)"
 echo "======================"
 
-mpirun -np ${SLURM_NTASKS} --bind-to none ./build/mpd-plasma-dynamics ${OMP_NUM_THREADS}
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}"
 
 # Job summary
 echo "Job completed at $(date)"
