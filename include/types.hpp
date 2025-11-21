@@ -10,6 +10,7 @@ struct SimulationParams {
     int animate;            // Animation flag (0=off, 1=on)
     int animation_frequency; // Output every N steps
     std::string output_format;  // vtk or plt
+    std::string output_dir;     // Output directory
     
     double convergence_threshold;
     int check_frequency;

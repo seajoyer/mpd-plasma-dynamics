@@ -230,6 +230,7 @@ auto main(int argc, char* argv[]) -> int {
     params.animate = 0;
     params.animation_frequency = 100;
     params.output_format = "vtk";
+    params.output_dir = "output";
 
     params.convergence_threshold = 1e-5;
     params.check_frequency = 2000;
@@ -284,6 +285,12 @@ auto main(int argc, char* argv[]) -> int {
             params.output_format = std::string(argv[i + 1]);
             if (domain.rank == 0) {
                 printf("Output format: %s\n", params.output_format.c_str());
+            }
+            i++;
+        } else if (std::string(argv[i]) == "--output-dir") {
+            params.output_dir = std::string(argv[i + 1]);
+            if (domain.rank == 0) {
+                printf("Output directory: %s\n", params.output_dir.c_str());
             }
             i++;
         }
@@ -478,14 +485,14 @@ auto main(int argc, char* argv[]) -> int {
                          global_fields_anim.v_z, global_fields_anim.v_r,
                          global_fields_anim.v_phi, global_fields_anim.e,
                          global_fields_anim.H_z, global_fields_anim.H_r,
-                         global_fields_anim.H_phi);
+                         global_fields_anim.H_phi, params.output_dir);
             } else if (params.output_format == "plt") {
                 WritePlt(filename.c_str(), params.L_max_global, params.M_max,
                          params.dz, global_grid_anim.r, global_fields_anim.rho,
                          global_fields_anim.v_z, global_fields_anim.v_r,
                          global_fields_anim.v_phi, global_fields_anim.e,
                          global_fields_anim.H_z, global_fields_anim.H_r,
-                         global_fields_anim.H_phi);
+                         global_fields_anim.H_phi, params.output_dir);
             }
 
             printf("Frame %d written (initial conditions, t=%.6f): %s\n", frame_count,
@@ -601,14 +608,14 @@ auto main(int argc, char* argv[]) -> int {
                              global_fields_anim.v_z, global_fields_anim.v_r,
                              global_fields_anim.v_phi, global_fields_anim.e,
                              global_fields_anim.H_z, global_fields_anim.H_r,
-                             global_fields_anim.H_phi);
+                             global_fields_anim.H_phi, params.output_dir);
                 } else if (params.output_format == "plt") {
                     WritePlt(filename.c_str(), params.L_max_global, params.M_max,
                              params.dz, global_grid_anim.r, global_fields_anim.rho,
                              global_fields_anim.v_z, global_fields_anim.v_r,
                              global_fields_anim.v_phi, global_fields_anim.e,
                              global_fields_anim.H_z, global_fields_anim.H_r,
-                             global_fields_anim.H_phi);
+                             global_fields_anim.H_phi, params.output_dir);
                 }
 
                 printf("Frame %d written at step %d (t=%.6f): %s\n", frame_count,
@@ -649,8 +656,9 @@ auto main(int argc, char* argv[]) -> int {
                 WriteVtk("output_MHD.vtk", params.L_max_global, params.M_max, params.dz,
                          global_grid.r, global_fields.rho, global_fields.v_z,
                          global_fields.v_r, global_fields.v_phi, global_fields.e,
-                         global_fields.H_z, global_fields.H_r, global_fields.H_phi);
-                printf("Final output written to: output_MHD.vtk\n");
+                         global_fields.H_z, global_fields.H_r, global_fields.H_phi,
+                         params.output_dir);
+                printf("Final output written to: %s/output_MHD.vtk\n", params.output_dir.c_str());
             }
 
             // tecplot output
@@ -658,8 +666,9 @@ auto main(int argc, char* argv[]) -> int {
                 WritePlt("output_MHD.plt", params.L_max_global, params.M_max, params.dz,
                          global_grid.r, global_fields.rho, global_fields.v_z,
                          global_fields.v_r, global_fields.v_phi, global_fields.e,
-                         global_fields.H_z, global_fields.H_r, global_fields.H_phi);
-                printf("Final output written to: output_MHD.plt\n");
+                         global_fields.H_z, global_fields.H_r, global_fields.H_phi,
+                         params.output_dir);
+                printf("Final output written to: %s/output_MHD.plt\n", params.output_dir.c_str());
             }
 
             // Clean up global arrays
@@ -682,14 +691,14 @@ auto main(int argc, char* argv[]) -> int {
                              global_fields_anim.v_z, global_fields_anim.v_r,
                              global_fields_anim.v_phi, global_fields_anim.e,
                              global_fields_anim.H_z, global_fields_anim.H_r,
-                             global_fields_anim.H_phi);
+                             global_fields_anim.H_phi, params.output_dir);
                 } else if (params.output_format == "plt") {
                     WritePlt(filename.c_str(), params.L_max_global, params.M_max,
                              params.dz, global_grid_anim.r, global_fields_anim.rho,
                              global_fields_anim.v_z, global_fields_anim.v_r,
                              global_fields_anim.v_phi, global_fields_anim.e,
                              global_fields_anim.H_z, global_fields_anim.H_r,
-                             global_fields_anim.H_phi);
+                             global_fields_anim.H_phi, params.output_dir);
                 }
 
                 printf("Final frame %d written at step %d (t=%.6f): %s\n", frame_count,

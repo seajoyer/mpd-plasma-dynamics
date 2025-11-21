@@ -3,14 +3,29 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 void WritePlt(const char* filename, int L_max_global, int M_max, double dz,
                double** r_global, double** rho_global, double** v_z_global,
                double** v_r_global, double** v_phi_global, double** e_global,
-               double** H_z_global, double** H_r_global, double** H_phi_global) {
-    std::ofstream out(filename);
+               double** H_z_global, double** H_r_global, double** H_phi_global,
+               const std::string& output_dir) {
+    
+    // Create output directory if it doesn't exist
+    if (output_dir != ".") {
+        struct stat st = {0};
+        if (stat(output_dir.c_str(), &st) == -1) {
+            mkdir(output_dir.c_str(), 0755);
+        }
+    }
+    
+    // Construct full path
+    std::string full_path = output_dir + "/" + filename;
+    
+    std::ofstream out(full_path);
     if (!out) {
-        std::cerr << "Error opening " << filename << '\n';
+        std::cerr << "Error opening " << full_path << '\n';
         return;
     }
 
