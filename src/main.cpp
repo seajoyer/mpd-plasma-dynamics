@@ -233,7 +233,7 @@ auto main(int argc, char* argv[]) -> int {
     params.output_dir = "output";
 
     params.convergence_threshold = 1e-5;
-    params.check_frequency = 2000;
+    params.check_frequency = 50000;
 
     params.T = 50.0;
     params.dt = 0.0000125;
