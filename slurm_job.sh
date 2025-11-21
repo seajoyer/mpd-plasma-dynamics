@@ -2,7 +2,7 @@
 #SBATCH --job-name=mpd-plasma-hybrid
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1  # 1 MPI task per node (total: 2 MPI tasks)
-#SBATCH --cpus-per-task=32   # 32 OpenMP threads per MPI task (total: 64 CPUs)
+#SBATCH --cpus-per-task=48   # 32 OpenMP threads per MPI task (total: 64 CPUs)
 #SBATCH --time=00:30:00
 #SBATCH --mem=4G
 #SBATCH --output=log/mpd-plasma-%j.out
@@ -24,9 +24,9 @@ echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
 echo "Date: $(date)"
 echo "======================"
 
-mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --animate --anim-freq 20000 --format vtk
+# mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --animate --anim-freq 20000 --format vtk
 
-# mpirun -np ${SLURM_NTASKS} --bind-to none ./build/mpd-plasma-dynamics ${OMP_NUM_THREADS} --converge 1e-6 --animate --anim-freq 100 --format vtk
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-5 --animate --anim-freq 50000
 
 # Job summary
 echo "Job completed at $(date)"
