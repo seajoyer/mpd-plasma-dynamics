@@ -235,10 +235,10 @@ auto main(int argc, char* argv[]) -> int {
     params.check_frequency = 2000;
 
     params.T = 15.0;
-    params.dt = 0.000025;
+    params.dt = 0.0000125;
 
     params.L_max_global = 800;
-    params.L_end = 320;
+    params.L_end = 265;
     params.M_max = 400;
 
     params.dz = 1.0 / params.L_max_global;

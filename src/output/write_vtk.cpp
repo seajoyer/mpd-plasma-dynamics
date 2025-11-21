@@ -1,6 +1,5 @@
 #include "output/write_vtk.hpp"
 
-#include <cmath>
 #include <fstream>
 #include <iostream>
 
@@ -27,12 +26,12 @@ void WriteVtk(const char* filename, int L_max_global, int M_max, double dz,
     int npoints = nx * ny * nz;
     out << "POINTS " << npoints << " float" << '\n';
 
-    // Write points: r as x, z as y, 0 as z_coord
+    // Write points: 0 as x, r as y, z as z_coord
     for (int m = 0; m < ny; ++m) {
         for (int l = 0; l < nx; ++l) {
-            double x = (l < L_max_global) ? r_global[l][m] : r_global[L_max_global-1][m];
-            double y = l * dz;
-            double z_coord = 0.0;
+            double x = 0.0;
+            double y = (l < L_max_global) ? r_global[l][m] : r_global[L_max_global-1][m];
+            double z_coord = l * dz;
             out << x << " " << y << " " << z_coord << '\n';
         }
     }
@@ -49,23 +48,14 @@ void WriteVtk(const char* filename, int L_max_global, int M_max, double dz,
         }
     }
 
-    // VECTORS Velocity (v_r, v_z, 0)
+    // VECTORS Velocity (v_phi, v_r, v_z)
     out << "VECTORS Velocity float" << '\n';
     for (int m = 0; m < ny; ++m) {
         for (int l = 0; l < nx; ++l) {
             double vr = (l < L_max_global) ? v_r_global[l][m] : v_r_global[L_max_global-1][m];
             double vz = (l < L_max_global) ? v_z_global[l][m] : v_z_global[L_max_global-1][m];
-            out << vr << " " << vz << " 0.0" << '\n';
-        }
-    }
-
-    // SCALARS Vphi
-    out << "SCALARS Vphi float 1" << '\n';
-    out << "LOOKUP_TABLE default" << '\n';
-    for (int m = 0; m < ny; ++m) {
-        for (int l = 0; l < nx; ++l) {
-            double val = (l < L_max_global) ? v_phi_global[l][m] : v_phi_global[L_max_global-1][m];
-            out << val << '\n';
+            double v_phi = (l < L_max_global) ? v_phi_global[l][m] : v_phi_global[L_max_global-1][m];
+            out << v_phi << " " << vr << " " << vz << '\n';
         }
     }
 
@@ -79,35 +69,14 @@ void WriteVtk(const char* filename, int L_max_global, int M_max, double dz,
         }
     }
 
-    // VECTORS MagneticField (H_r, H_z, 0)
+    // VECTORS MagneticField (H_phi, H_r, H_z)
     out << "VECTORS MagneticField float" << '\n';
     for (int m = 0; m < ny; ++m) {
         for (int l = 0; l < nx; ++l) {
             double hr = (l < L_max_global) ? H_r_global[l][m] : H_r_global[L_max_global-1][m];
             double hz = (l < L_max_global) ? H_z_global[l][m] : H_z_global[L_max_global-1][m];
-            out << hr << " " << hz << " 0.0" << '\n';
-        }
-    }
-
-    // SCALARS Hphi
-    out << "SCALARS Hphi float 1" << '\n';
-    out << "LOOKUP_TABLE default" << '\n';
-    for (int m = 0; m < ny; ++m) {
-        for (int l = 0; l < nx; ++l) {
-            double val = (l < L_max_global) ? H_phi_global[l][m] : H_phi_global[L_max_global-1][m];
-            out << val << '\n';
-        }
-    }
-
-    // SCALARS Vl = sqrt(v_z^2 + v_r^2)
-    out << "SCALARS Vl float 1" << '\n';
-    out << "LOOKUP_TABLE default" << '\n';
-    for (int m = 0; m < ny; ++m) {
-        for (int l = 0; l < nx; ++l) {
-            double vr = (l < L_max_global) ? v_r_global[l][m] : v_r_global[L_max_global-1][m];
-            double vz = (l < L_max_global) ? v_z_global[l][m] : v_z_global[L_max_global-1][m];
-            double vl = std::sqrt(vz * vz + vr * vr);
-            out << vl << '\n';
+            double h_phi = (l < L_max_global) ? H_phi_global[l][m] : H_phi_global[L_max_global-1][m];
+            out << h_phi << " " << hr << " " << hz << '\n';
         }
     }
 
