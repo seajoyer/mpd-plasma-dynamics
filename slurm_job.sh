@@ -26,7 +26,7 @@ echo "======================"
 
 # mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --animate --anim-freq 20000 --format vtk
 
-mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-5 --animate --anim-freq 50000 --check-freq 100
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-6 --animate --anim-freq 50000 --check-freq 100
 
 # Job summary
 echo "Job completed at $(date)"
