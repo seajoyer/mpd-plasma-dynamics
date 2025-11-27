@@ -161,16 +161,42 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-// Initialize physical fields
+// Initialize physical fields with lateral step inflow boundary conditions
+// - Before step (z < z_start): stagnant gas (closed wall on left)
+// - At step (z_start <= z <= z_end): inflow from lateral gap
+// - After step (z > z_end): developed flow
 #pragma omp parallel for collapse(2)
     for (int l = 1; l < domain.local_L_with_ghosts - 1; l++) {
         for (int m = 0; m < params.M_max + 1; m++) {
             int l_global = domain.l_start + l - 1;
+            double z = l_global * params.dz;
+            
+            // Step geometry parameters (must match geometry.cpp and boundary.cpp)
+            const double z_center = 0.31;
+            const double transition_width = 0.015;
+            const double z_start = z_center - transition_width;
+            const double z_end = z_center + transition_width;
 
             fields.rho[l][m] = 1.0;
-            fields.v_z[l][m] = 0.1;
-            fields.v_r[l][m] = 0.1;
             fields.v_phi[l][m] = 0;
+            
+            // Different initial conditions based on position relative to step
+            if (z < z_start) {
+                // Before step: stagnant gas (wall on left boundary)
+                fields.v_z[l][m] = 0.0;
+                fields.v_r[l][m] = 0.0;
+            } else if (z >= z_start && z <= z_end) {
+                // At step transition: gradual increase of velocity (inflow region)
+                double xi = (z - z_start) / (z_end - z_start);
+                double smooth = 0.5 * (1.0 - cos(M_PI * xi));
+                fields.v_z[l][m] = 0.1 * smooth;
+                fields.v_r[l][m] = -0.03 * smooth;  // Small inward radial component
+            } else {
+                // After step: developed flow
+                fields.v_z[l][m] = 0.1;
+                fields.v_r[l][m] = 0.0;
+            }
+            
             fields.H_phi[l][m] = (1 - 0.9 * l_global * params.dz) * r_0 / grid.r[l][m];
             fields.H_z[l][m] = params.H_z0;
             fields.H_r[l][m] = fields.H_z[l][m] * grid.r_z[l][m];
@@ -205,15 +231,25 @@ auto main(int argc, char* argv[]) -> int {
 
     // Initialize ghost cells for boundary ranks before first time step
     if (domain.rank == 0) {
-// Copy first physical cell to left ghost cell
+// Left boundary: Wall/No-flow conditions
+// Set l=1 (first physical cell) to wall BC
+#pragma omp parallel for
+        for (int m = 0; m < params.M_max + 1; m++) {
+            // Wall boundary - no flow
+            fields.v_z[1][m] = 0.0;
+            fields.v_r[1][m] = 0.0;
+            fields.H_z[1][m] = 0.0;  // No normal B-field at conducting wall
+        }
+
+// Copy to left ghost cell with reflection for wall
 #pragma omp parallel for
         for (int m = 0; m < params.M_max + 1; m++) {
             fields.rho[0][m] = fields.rho[1][m];
-            fields.v_z[0][m] = fields.v_z[1][m];
+            fields.v_z[0][m] = -fields.v_z[2][m];  // Reflect v_z (normal component)
             fields.v_r[0][m] = fields.v_r[1][m];
             fields.v_phi[0][m] = fields.v_phi[1][m];
             fields.H_phi[0][m] = fields.H_phi[1][m];
-            fields.H_z[0][m] = fields.H_z[1][m];
+            fields.H_z[0][m] = -fields.H_z[2][m];  // Reflect H_z (normal component)
             fields.H_r[0][m] = fields.H_r[1][m];
             fields.e[0][m] = fields.e[1][m];
             fields.p[0][m] = fields.p[1][m];
@@ -227,6 +263,19 @@ auto main(int argc, char* argv[]) -> int {
             u0.u_6[0][m] = fields.H_phi[0][m];
             u0.u_7[0][m] = fields.H_z[0][m] * grid.r[0][m];
             u0.u_8[0][m] = fields.H_r[0][m] * grid.r[0][m];
+        }
+
+// Update u0 for l=1 (wall BC)
+#pragma omp parallel for
+        for (int m = 0; m < params.M_max + 1; m++) {
+            u0.u_1[1][m] = fields.rho[1][m] * grid.r[1][m];
+            u0.u_2[1][m] = 0.0;  // No axial momentum (wall)
+            u0.u_3[1][m] = 0.0;  // No radial momentum (wall)
+            u0.u_4[1][m] = 0.0;  // No azimuthal momentum
+            u0.u_5[1][m] = fields.rho[1][m] * fields.e[1][m] * grid.r[1][m];
+            u0.u_6[1][m] = fields.H_phi[1][m];
+            u0.u_7[1][m] = 0.0;  // No H_z at conducting wall
+            u0.u_8[1][m] = fields.H_r[1][m] * grid.r[1][m];
         }
     }
 
