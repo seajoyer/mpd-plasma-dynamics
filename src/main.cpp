@@ -236,7 +236,7 @@ auto main(int argc, char* argv[]) -> int {
     params.check_frequency = 100;
 
     params.T = 50.0;
-    params.dt = 0.0000125;
+    params.dt = 0.000005;
 
     params.L_max_global = 800;
     params.L_end = 265;
