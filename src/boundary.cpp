@@ -24,26 +24,22 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     const double r_before = 0.2;   // Inner radius before step
     const double r_after = 0.005;  // Inner radius after step (narrow throat)
     
-    // Global l indices for step transition region
+    // Global l indices for step transition region (RED ZONE - inlet)
     const int l_step_start = static_cast<int>(z_start / dz);
     const int l_step_end = static_cast<int>(z_end / dz);
     
-    // Calculate number of m-cells that span the lateral gap
-    // At z > z_end: r(l,m) = (1-m*dy)*R1_after + m*dy*R2
-    // The gap is from r = r_after (0.005) to r = r_before (0.2)
-    // m_gap where r(l, m_gap) = r_before
+    // Calculate number of m-cells that span the lateral gap for inlet
     const double dy = params.dy;
     const double R2_val = 0.8;  // Outer radius (constant)
-    // r = r_after + m * dy * (R2 - r_after) = r_before
-    // m_gap = (r_before - r_after) / (dy * (R2 - r_after))
+    // m_gap where r(l, m_gap) = r_before at the step region
     const int m_gap = static_cast<int>((r_before - r_after) / (dy * (R2_val - r_after)));
     
-    // Inflow velocity through lateral gap (can be adjusted)
-    const double v_inflow = 0.1;  // Axial velocity component entering the channel
+    // Inflow parameters for RED zone (inlet at step)
+    const double v_inflow = 1.0;  // Inlet velocity
     
     // =========================================================================
     // LEFT BOUNDARY CONDITION (z=0) - WALL / NO-FLOW
-    // Only for rank 0
+    // Only for rank 0 - same as original boundary.cpp
     // =========================================================================
     if (domain.rank == 0) {
         #pragma omp parallel for
@@ -104,7 +100,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
 
     // =========================================================================
     // UP BOUNDARY CONDITION (outer radius, m = M_max)
-    // Outflow / extrapolation boundary
+    // Same as boundary-pure.cpp
     // =========================================================================
     #pragma omp parallel for
     for (int l = 1; l < local_L + 1; l++) {
@@ -128,168 +124,95 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     }
 
     // =========================================================================
-    // DOWN BOUNDARY CONDITION - BEFORE STEP (l < l_step_start)
-    // Wall / no-flow at inner solid boundary
+    // GREEN ZONE: DOWN BOUNDARY CONDITION - BEFORE STEP (l <= L_end, m = 0)
+    // Non-leakage (slip wall) condition - same as boundary-pure.cpp
     // =========================================================================
-    if (domain.l_start < l_step_start && domain.l_end >= 1) {
-        int L_wall_end = std::min(l_step_start - 1, domain.l_end);
-        int local_L_wall_end = L_wall_end - domain.l_start + 1;
+    if (domain.l_start <= L_end && domain.l_end >= 1) {
+        int L_end_in_domain = std::min(L_end, domain.l_end);
+        int local_L_end_rel = L_end_in_domain - domain.l_start + 1;
         
-        for (int l = 1; l <= local_L_wall_end; l++) {
+        for (int l = 1; l <= local_L_end_rel; l++) {
             int l_global = domain.l_start + l - 1;
-            if (l_global >= 1 && l_global < l_step_start) {
-                // Wall boundary (no-flow) at inner surface before the step
+            if (l_global >= 1 && l_global <= L_end) {
+                // Non-leakage (slip wall) condition from boundary-pure.cpp
                 fields.rho[l][0] = fields.rho[l][1];
                 fields.v_z[l][0] = fields.v_z[l][1];
-                fields.v_r[l][0] = 0.0;  // No flow through wall
+                fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
                 fields.v_phi[l][0] = fields.v_phi[l][1];
                 fields.e[l][0] = fields.e[l][1];
                 fields.H_phi[l][0] = fields.H_phi[l][1];
                 fields.H_z[l][0] = fields.H_z[l][1];
-                fields.H_r[l][0] = 0.0;  // No normal B-field at wall
+                fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
 
                 u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
                 u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
-                u.u_3[l][0] = 0.0;  // No radial momentum flux
+                u.u_3[l][0] = fields.rho[l][0] * fields.v_r[l][0] * grid.r[l][0];
                 u.u_4[l][0] = fields.rho[l][0] * fields.v_phi[l][0] * grid.r[l][0];
                 u.u_5[l][0] = fields.rho[l][0] * fields.e[l][0] * grid.r[l][0];
                 u.u_6[l][0] = fields.H_phi[l][0];
                 u.u_7[l][0] = fields.H_z[l][0] * grid.r[l][0];
-                u.u_8[l][0] = 0.0;  // No radial B-field flux
+                u.u_8[l][0] = fields.H_r[l][0] * grid.r[l][0];
             }
         }
     }
 
     // =========================================================================
-    // LATERAL STEP INFLOW BOUNDARY (l_step_start <= l <= l_step_end)
-    // This is the lateral gap where gas enters from the side surface of the step
-    // Gas flows through the gap between r_after and r_before at the step
+    // RED ZONE: INLET AT THE STEP TRANSITION REGION
+    // Applies inlet stream at the vertical step (from l_step_start to l_step_end)
+    // for cells in the gap region (m from 0 to m_gap)
     // =========================================================================
-    if (domain.l_start <= l_step_end && domain.l_end >= l_step_start) {
-        int local_l_start = std::max(1, l_step_start - domain.l_start + 1);
-        int local_l_end = std::min(local_L, l_step_end - domain.l_start + 1);
+    for (int l = 1; l < local_L + 1; l++) {
+        int l_global = domain.l_start + l - 1;
         
-        for (int l = local_l_start; l <= local_l_end; l++) {
-            int l_global = domain.l_start + l - 1;
-            if (l_global >= l_step_start && l_global <= l_step_end) {
-                // Calculate local step geometry progress (0 to 1 through transition)
-                double z_local = l_global * dz;
-                double xi = (z_local - z_start) / (z_end - z_start);
-                xi = std::max(0.0, std::min(1.0, xi));  // Clamp to [0,1]
+        // Check if we're in the step transition region (RED zone)
+        if (l_global >= l_step_start && l_global <= l_step_end) {
+            // Calculate how far along the transition we are (0 to 1)
+            double transition_progress = 0.0;
+            if (l_step_end > l_step_start) {
+                transition_progress = static_cast<double>(l_global - l_step_start) / 
+                                     static_cast<double>(l_step_end - l_step_start);
+            }
+            
+            // Apply inlet condition to cells in the gap region
+            int m_inflow_max = static_cast<int>(m_gap * transition_progress);
+            m_inflow_max = std::min(m_inflow_max, M_max - 1);
+            
+            for (int m = 0; m <= m_inflow_max; m++) {
+                // Radial position factor (stronger inlet near the wall, weaker higher up)
+                double m_factor = 1.0 - static_cast<double>(m) / static_cast<double>(m_inflow_max + 1);
                 
-                // Smooth transition factor (same as in geometry.cpp)
-                double smooth_factor = 0.5 * (1.0 - cos(M_PI * xi));
+                // Inlet conditions
+                fields.rho[l][m] = 1.0;
+                fields.v_phi[l][m] = 0.0;
                 
-                // Current R1 at this z-location
-                double R1_local = r_before + (r_after - r_before) * smooth_factor;
+                // Velocity: primarily radial (inward) with some axial component
+                fields.v_z[l][m] = v_inflow;  // Axial component
+                fields.v_r[l][m] = 0; // -v_inflow * m_factor;  // Radial inward (negative)
                 
-                // Calculate how many m-cells are in the "gap" region at this l
-                // The gap extends from R1_local up to r_before
-                int m_gap_local = static_cast<int>((r_before - R1_local) / grid.dr[l]);
-                m_gap_local = std::max(1, std::min(m_gap_local, m_gap));
+                // Magnetic field at inlet
+                fields.H_phi[l][m] = r_0 / grid.r[l][m];
+                fields.H_z[l][m] = H_z0;
+                fields.H_r[l][m] = fields.H_z[l][m] * grid.r_z[l][m];
                 
-                // Apply inflow conditions at lower m values (the gap region)
-                for (int m = 0; m <= m_gap_local; m++) {
-                    // Inflow through lateral gap
-                    // Gas enters with axial velocity component (into the channel)
-                    // and radial velocity component (inward toward axis)
-                    
-                    fields.rho[l][m] = 1.0;  // Inlet density
-                    fields.v_phi[l][m] = 0.0;
-                    
-                    // Velocity: primarily axial (into the nozzle), with radial component
-                    // The radial component is inward (negative) to simulate flow from the gap
-                    double radial_factor = smooth_factor;  // More radial at end of transition
-                    fields.v_z[l][m] = v_inflow * (1.0 - 0.3 * radial_factor);
-                    fields.v_r[l][m] = -v_inflow * 0.5 * radial_factor;  // Inward (negative r direction)
-                    
-                    // Magnetic field at inlet
-                    fields.H_phi[l][m] = r_0 / grid.r[l][m];
-                    fields.H_z[l][m] = H_z0;
-                    fields.H_r[l][m] = fields.H_z[l][m] * grid.r_z[l][m];
-                    
-                    // Internal energy
-                    fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);
+                // Internal energy
+                fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);
 
-                    // Update conservative variables
-                    u.u_1[l][m] = fields.rho[l][m] * grid.r[l][m];
-                    u.u_2[l][m] = fields.rho[l][m] * fields.v_z[l][m] * grid.r[l][m];
-                    u.u_3[l][m] = fields.rho[l][m] * fields.v_r[l][m] * grid.r[l][m];
-                    u.u_4[l][m] = fields.rho[l][m] * fields.v_phi[l][m] * grid.r[l][m];
-                    u.u_5[l][m] = fields.rho[l][m] * fields.e[l][m] * grid.r[l][m];
-                    u.u_6[l][m] = fields.H_phi[l][m];
-                    u.u_7[l][m] = fields.H_z[l][m] * grid.r[l][m];
-                    u.u_8[l][m] = fields.H_r[l][m] * grid.r[l][m];
-                }
+                // Update conservative variables
+                u.u_1[l][m] = fields.rho[l][m] * grid.r[l][m];
+                u.u_2[l][m] = fields.rho[l][m] * fields.v_z[l][m] * grid.r[l][m];
+                u.u_3[l][m] = fields.rho[l][m] * fields.v_r[l][m] * grid.r[l][m];
+                u.u_4[l][m] = fields.rho[l][m] * fields.v_phi[l][m] * grid.r[l][m];
+                u.u_5[l][m] = fields.rho[l][m] * fields.e[l][m] * grid.r[l][m];
+                u.u_6[l][m] = fields.H_phi[l][m];
+                u.u_7[l][m] = fields.H_z[l][m] * grid.r[l][m];
+                u.u_8[l][m] = fields.H_r[l][m] * grid.r[l][m];
             }
         }
     }
 
     // =========================================================================
-    // DOWN BOUNDARY CONDITION - AFTER STEP TRANSITION (l_step_end < l <= L_end)
-    // Inflow region in the narrow channel near the step
-    // =========================================================================
-    if (domain.l_start <= L_end && domain.l_end > l_step_end) {
-        int local_l_start = std::max(1, l_step_end + 1 - domain.l_start + 1);
-        int local_l_end = std::min(local_L, L_end - domain.l_start + 1);
-        
-        for (int l = local_l_start; l <= local_l_end; l++) {
-            int l_global = domain.l_start + l - 1;
-            if (l_global > l_step_end && l_global <= L_end) {
-                // In the narrow channel after the step, apply inflow at lower boundary
-                // This represents flow that has entered through the lateral gap
-                
-                // Apply inflow at cells in the gap region (m from 0 to m_gap)
-                int m_inflow_max = std::min(m_gap, M_max - 1);
-                
-                for (int m = 0; m <= m_inflow_max; m++) {
-                    // Distance from step (for smooth transition)
-                    double dist_factor = static_cast<double>(l_global - l_step_end) / 
-                                        static_cast<double>(L_end - l_step_end);
-                    dist_factor = std::min(1.0, dist_factor);
-                    
-                    // Radial position factor (less inflow intensity at higher m)
-                    double m_factor = 1.0 - static_cast<double>(m) / static_cast<double>(m_inflow_max + 1);
-                    
-                    fields.rho[l][m] = 1.0;
-                    fields.v_phi[l][m] = 0.0;
-                    
-                    // Velocity: primarily axial, decreasing radial component with distance from step
-                    fields.v_z[l][m] = v_inflow;
-                    fields.v_r[l][m] = -v_inflow * 0.3 * (1.0 - dist_factor) * m_factor;  // Decreasing inward flow
-                    
-                    // Magnetic field at inlet
-                    fields.H_phi[l][m] = r_0 / grid.r[l][m];
-                    fields.H_z[l][m] = H_z0;
-                    fields.H_r[l][m] = fields.H_z[l][m] * grid.r_z[l][m];
-                    
-                    // Internal energy
-                    fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);
-
-                    // Update conservative variables
-                    u.u_1[l][m] = fields.rho[l][m] * grid.r[l][m];
-                    u.u_2[l][m] = fields.rho[l][m] * fields.v_z[l][m] * grid.r[l][m];
-                    u.u_3[l][m] = fields.rho[l][m] * fields.v_r[l][m] * grid.r[l][m];
-                    u.u_4[l][m] = fields.rho[l][m] * fields.v_phi[l][m] * grid.r[l][m];
-                    u.u_5[l][m] = fields.rho[l][m] * fields.e[l][m] * grid.r[l][m];
-                    u.u_6[l][m] = fields.H_phi[l][m];
-                    u.u_7[l][m] = fields.H_z[l][m] * grid.r[l][m];
-                    u.u_8[l][m] = fields.H_r[l][m] * grid.r[l][m];
-                }
-                
-                // For m > m_inflow_max (above the gap), apply wall BC at m=0 only
-                if (m_inflow_max < M_max) {
-                    // The cells above the gap region at the inner boundary
-                    // These are at r > r_before and should not have special treatment
-                    // (they are interior cells, not at the actual inner boundary)
-                }
-            }
-        }
-    }
-
-    // =========================================================================
-    // DOWN BOUNDARY CONDITION - FAR FROM STEP (l > L_end)
-    // Open/outflow boundary condition
+    // YELLOW ZONE: DOWN BOUNDARY CONDITION - AFTER STEP (l > L_end, m = 0)
+    // Same condition as boundary-pure.cpp - characteristic-based BC
     // =========================================================================
     #pragma omp parallel for
     for (int l = 1; l < local_L + 1; l++) {
@@ -298,7 +221,6 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         if (l_global > L_end && l_global < L_max_global) {
             int m = 0;
             
-            // Characteristic-based outflow boundary
             u.u_1[l][m] = (0.25 * (u.u_1[l + 1][m] / grid.r[l + 1][m] + u.u_1[l - 1][m] / grid.r[l - 1][m] + 
                                     u.u_1[l][m + 1] / grid.r[l][m + 1] + u.u_1[l][m] / grid.r[l][m]) +
                           params.dt * (0 - 
@@ -351,7 +273,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
 
     // =========================================================================
     // RIGHT BOUNDARY CONDITION (z = z_max) - OUTFLOW
-    // Only for last rank
+    // Same as boundary-pure.cpp - Only for last rank
     // =========================================================================
     if (domain.rank == domain.size - 1) {
         #pragma omp parallel for
