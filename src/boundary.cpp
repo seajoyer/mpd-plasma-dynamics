@@ -35,7 +35,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     const int m_gap = static_cast<int>((r_before - r_after) / (dy * (R2_val - r_after)));
     
     // Inflow parameters for RED zone (inlet at step)
-    const double v_inflow = 1.0;  // Inlet velocity
+    const double v_inflow = 0.1;  // Inlet velocity
     
     // =========================================================================
     // LEFT BOUNDARY CONDITION (z=0) - WALL / NO-FLOW
@@ -124,89 +124,105 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     }
 
     // =========================================================================
-    // GREEN ZONE: DOWN BOUNDARY CONDITION - BEFORE STEP (l <= L_end, m = 0)
+    // GREEN ZONE: DOWN BOUNDARY CONDITION - BEFORE STEP (l < l_step_start, m = 0)
     // Non-leakage (slip wall) condition - same as boundary-pure.cpp
-    // =========================================================================
-    if (domain.l_start <= L_end && domain.l_end >= 1) {
-        int L_end_in_domain = std::min(L_end, domain.l_end);
-        int local_L_end_rel = L_end_in_domain - domain.l_start + 1;
-        
-        for (int l = 1; l <= local_L_end_rel; l++) {
-            int l_global = domain.l_start + l - 1;
-            if (l_global >= 1 && l_global <= L_end) {
-                // Non-leakage (slip wall) condition from boundary-pure.cpp
-                fields.rho[l][0] = fields.rho[l][1];
-                fields.v_z[l][0] = fields.v_z[l][1];
-                fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
-                fields.v_phi[l][0] = fields.v_phi[l][1];
-                fields.e[l][0] = fields.e[l][1];
-                fields.H_phi[l][0] = fields.H_phi[l][1];
-                fields.H_z[l][0] = fields.H_z[l][1];
-                fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
-
-                u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
-                u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
-                u.u_3[l][0] = fields.rho[l][0] * fields.v_r[l][0] * grid.r[l][0];
-                u.u_4[l][0] = fields.rho[l][0] * fields.v_phi[l][0] * grid.r[l][0];
-                u.u_5[l][0] = fields.rho[l][0] * fields.e[l][0] * grid.r[l][0];
-                u.u_6[l][0] = fields.H_phi[l][0];
-                u.u_7[l][0] = fields.H_z[l][0] * grid.r[l][0];
-                u.u_8[l][0] = fields.H_r[l][0] * grid.r[l][0];
-            }
-        }
-    }
-
-    // =========================================================================
-    // RED ZONE: INLET AT THE STEP TRANSITION REGION
-    // Applies inlet stream at the vertical step (from l_step_start to l_step_end)
-    // for cells in the gap region (m from 0 to m_gap)
+    // This is the inner wall before the step begins
     // =========================================================================
     for (int l = 1; l < local_L + 1; l++) {
         int l_global = domain.l_start + l - 1;
         
-        // Check if we're in the step transition region (RED zone)
-        if (l_global >= l_step_start && l_global <= l_step_end) {
-            // Calculate how far along the transition we are (0 to 1)
-            double transition_progress = 0.0;
-            if (l_step_end > l_step_start) {
-                transition_progress = static_cast<double>(l_global - l_step_start) / 
-                                     static_cast<double>(l_step_end - l_step_start);
-            }
-            
-            // Apply inlet condition to cells in the gap region
-            int m_inflow_max = static_cast<int>(m_gap * transition_progress);
-            m_inflow_max = std::min(m_inflow_max, M_max - 1);
-            
-            for (int m = 0; m <= m_inflow_max; m++) {
-                // Radial position factor (stronger inlet near the wall, weaker higher up)
-                double m_factor = 1.0 - static_cast<double>(m) / static_cast<double>(m_inflow_max + 1);
-                
-                // Inlet conditions
-                fields.rho[l][m] = 1.0;
-                fields.v_phi[l][m] = 0.0;
-                
-                // Velocity: primarily radial (inward) with some axial component
-                fields.v_z[l][m] = v_inflow;  // Axial component
-                fields.v_r[l][m] = 0; // -v_inflow * m_factor;  // Radial inward (negative)
-                
-                // Magnetic field at inlet
-                fields.H_phi[l][m] = r_0 / grid.r[l][m];
-                fields.H_z[l][m] = H_z0;
-                fields.H_r[l][m] = fields.H_z[l][m] * grid.r_z[l][m];
-                
-                // Internal energy
-                fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);
+        // Only apply to cells before the step transition starts
+        if (l_global >= 1 && l_global < l_step_start) {
+            // Non-leakage (slip wall) condition from boundary-pure.cpp
+            fields.rho[l][0] = fields.rho[l][1];
+            fields.v_z[l][0] = fields.v_z[l][1];
+            fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
+            fields.v_phi[l][0] = fields.v_phi[l][1];
+            fields.e[l][0] = fields.e[l][1];
+            fields.H_phi[l][0] = fields.H_phi[l][1];
+            fields.H_z[l][0] = fields.H_z[l][1];
+            fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
 
-                // Update conservative variables
-                u.u_1[l][m] = fields.rho[l][m] * grid.r[l][m];
-                u.u_2[l][m] = fields.rho[l][m] * fields.v_z[l][m] * grid.r[l][m];
-                u.u_3[l][m] = fields.rho[l][m] * fields.v_r[l][m] * grid.r[l][m];
-                u.u_4[l][m] = fields.rho[l][m] * fields.v_phi[l][m] * grid.r[l][m];
-                u.u_5[l][m] = fields.rho[l][m] * fields.e[l][m] * grid.r[l][m];
-                u.u_6[l][m] = fields.H_phi[l][m];
-                u.u_7[l][m] = fields.H_z[l][m] * grid.r[l][m];
-                u.u_8[l][m] = fields.H_r[l][m] * grid.r[l][m];
-            }
+            u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
+            u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
+            u.u_3[l][0] = fields.rho[l][0] * fields.v_r[l][0] * grid.r[l][0];
+            u.u_4[l][0] = fields.rho[l][0] * fields.v_phi[l][0] * grid.r[l][0];
+            u.u_5[l][0] = fields.rho[l][0] * fields.e[l][0] * grid.r[l][0];
+            u.u_6[l][0] = fields.H_phi[l][0];
+            u.u_7[l][0] = fields.H_z[l][0] * grid.r[l][0];
+            u.u_8[l][0] = fields.H_r[l][0] * grid.r[l][0];
+        }
+    }
+
+   // =========================================================================
+    // RED ZONE: INLET AT THE STEP SURFACE ONLY
+    // Applies inlet stream ONLY at the boundary interface (m = 0) 
+    // for the axial range of the step transition.
+    // =========================================================================
+    for (int l = 1; l < local_L + 1; l++) {
+        int l_global = domain.l_start + l - 1;
+        
+        // Only apply condition at the step transition region (RED zone)
+        if (l_global >= l_step_start && l_global <= l_step_end) {
+            
+            // We apply the condition ONLY to the surface (m = 0)
+            const int m = 0;
+
+            // 1. Set constant density as requested
+            fields.rho[l][m] = 1.0;
+            
+            // 2. Velocity: Plasma enters through the surface
+            // v_r < 0 means flow is directed radially inward from the step face
+            fields.v_phi[l][m] = 0.0;
+            fields.v_z[l][m]   = v_inflow;  // Axial component downstream
+            fields.v_r[l][m]   = 0;       // Radial inward velocity at the surface
+            
+            // 3. Magnetic field at inlet surface
+            fields.H_phi[l][m] = r_0 / grid.r[l][m];
+            fields.H_z[l][m]   = H_z0;
+            fields.H_r[l][m]   = fields.H_z[l][m] * grid.r_z[l][m];
+            
+            // 4. Internal energy (based on the specified rho and beta)
+            fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);
+
+            // 5. Update conservative variables for the surface cell
+            u.u_1[l][m] = fields.rho[l][m] * grid.r[l][m];
+            u.u_2[l][m] = fields.rho[l][m] * fields.v_z[l][m] * grid.r[l][m];
+            u.u_3[l][m] = fields.rho[l][m] * fields.v_r[l][m] * grid.r[l][m];
+            u.u_4[l][m] = fields.rho[l][m] * fields.v_phi[l][m] * grid.r[l][m];
+            u.u_5[l][m] = fields.rho[l][m] * fields.e[l][m] * grid.r[l][m];
+            u.u_6[l][m] = fields.H_phi[l][m];
+            u.u_7[l][m] = fields.H_z[l][m] * grid.r[l][m];
+            u.u_8[l][m] = fields.H_r[l][m] * grid.r[l][m];
+        }
+    } 
+    // =========================================================================
+    // REGION BETWEEN STEP AND L_END (l_step_end < l <= L_end, m = 0)
+    // Non-leakage (slip wall) condition - inner wall after the step narrows
+    // =========================================================================
+    for (int l = 1; l < local_L + 1; l++) {
+        int l_global = domain.l_start + l - 1;
+        
+        // Apply to cells after the step transition but before L_end
+        if (l_global > l_step_end && l_global <= L_end) {
+            // Non-leakage (slip wall) condition from boundary-pure.cpp
+            fields.rho[l][0] = fields.rho[l][1];
+            fields.v_z[l][0] = fields.v_z[l][1];
+            fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
+            fields.v_phi[l][0] = fields.v_phi[l][1];
+            fields.e[l][0] = fields.e[l][1];
+            fields.H_phi[l][0] = fields.H_phi[l][1];
+            fields.H_z[l][0] = fields.H_z[l][1];
+            fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
+
+            u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
+            u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
+            u.u_3[l][0] = fields.rho[l][0] * fields.v_r[l][0] * grid.r[l][0];
+            u.u_4[l][0] = fields.rho[l][0] * fields.v_phi[l][0] * grid.r[l][0];
+            u.u_5[l][0] = fields.rho[l][0] * fields.e[l][0] * grid.r[l][0];
+            u.u_6[l][0] = fields.H_phi[l][0];
+            u.u_7[l][0] = fields.H_z[l][0] * grid.r[l][0];
+            u.u_8[l][0] = fields.H_r[l][0] * grid.r[l][0];
         }
     }
 
@@ -311,3 +327,4 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         }
     }
 }
+
