@@ -320,6 +320,12 @@ auto main(int argc, char* argv[]) -> int {
                 printf("Filename template: %s\n", params.filename_template.c_str());
             }
             i++;
+        } else if (std::string(argv[i]) == "--end-time") {
+            params.T = atof(argv[i + 1]);
+            if (domain.rank == 0) {
+                printf("Maximum value for time: %e\n", params.T);
+            }
+            i++;
         }
     }
 
