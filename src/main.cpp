@@ -19,25 +19,25 @@
 
 // Helper function to generate numbered output filenames
 auto GenerateOutputFilename(const std::string& format, int frame_number,
-                            int mpi_size, int omp_threads) -> std::string {
+                            int mpi_size, int omp_threads,
+                            const std::string& filename_template,
+                            int L_max = 0, int M_max = 0, double dt = 0.0) -> std::string {
     const std::string ext = (format == "vtk") ? "vtk" : (format == "plt") ? "plt" : "dat";
 
     std::ostringstream filename;
-    filename << "output__MPI_" << std::setw(3) << std::setfill('0') << mpi_size
-             << "__OMP_" << std::setw(3) << std::setfill('0') << omp_threads
-             << "__frame_" << std::setw(6) << std::setfill('0') << frame_number
-             << '.' << ext;
-    return filename.str();
-}
-
-auto GenerateFinalOutputFilename(const std::string& format,
-                                 int mpi_size, int omp_threads) -> std::string {
-    const std::string ext = (format == "vtk") ? "vtk" : (format == "plt") ? "plt" : "dat";
-
-    std::ostringstream filename;
-    filename << "output__MPI_" << std::setw(3) << std::setfill('0') << mpi_size
-             << "__OMP_" << std::setw(3) << std::setfill('0') << omp_threads
-             << "__final." << ext;
+    
+    if (filename_template == "parallel") {
+        filename << "output__MPI_" << std::setw(3) << std::setfill('0') << mpi_size
+                 << "__OMP_" << std::setw(3) << std::setfill('0') << omp_threads
+                 << "__frame_" << std::setw(6) << std::setfill('0') << frame_number
+                 << '.' << ext;
+    } else {
+        filename << "res_" << L_max << "x" << M_max
+                 << "__dt_" << std::fixed << std::setprecision(6) << dt
+                 << "__frame_" << std::setw(6) << std::setfill('0') << frame_number
+                 << '.' << ext;
+    }
+    
     return filename.str();
 }
 
@@ -314,6 +314,12 @@ auto main(int argc, char* argv[]) -> int {
                 printf("Output directory: %s\n", params.output_dir.c_str());
             }
             i++;
+        } else if (std::string(argv[i]) == "--filename-template") {
+            params.filename_template = std::string(argv[i + 1]);
+            if (domain.rank == 0) {
+                printf("Filename template: %s\n", params.filename_template.c_str());
+            }
+            i++;
         }
     }
 
@@ -498,22 +504,24 @@ auto main(int argc, char* argv[]) -> int {
 
         if (domain.rank == 0) {
             std::string filename = GenerateOutputFilename(params.output_format, frame_count,
-                                                          domain.size, omp_get_max_threads());
+                                                        domain.size, omp_get_max_threads(),
+                                                        params.filename_template,
+                                                        params.L_max_global, params.M_max, params.dt);
 
             if (params.output_format == "vtk") {
                 WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
-                         params.dz, global_grid_anim.r, global_fields_anim.rho,
-                         global_fields_anim.v_z, global_fields_anim.v_r,
-                         global_fields_anim.v_phi, global_fields_anim.e,
-                         global_fields_anim.H_z, global_fields_anim.H_r,
-                         global_fields_anim.H_phi, params.output_dir);
+                            params.dz, global_grid_anim.r, global_fields_anim.rho,
+                            global_fields_anim.v_z, global_fields_anim.v_r,
+                            global_fields_anim.v_phi, global_fields_anim.e,
+                            global_fields_anim.H_z, global_fields_anim.H_r,
+                            global_fields_anim.H_phi, params.output_dir);
             } else if (params.output_format == "plt") {
                 WritePlt(filename.c_str(), params.L_max_global, params.M_max,
-                         params.dz, global_grid_anim.r, global_fields_anim.rho,
-                         global_fields_anim.v_z, global_fields_anim.v_r,
-                         global_fields_anim.v_phi, global_fields_anim.e,
-                         global_fields_anim.H_z, global_fields_anim.H_r,
-                         global_fields_anim.H_phi, params.output_dir);
+                            params.dz, global_grid_anim.r, global_fields_anim.rho,
+                            global_fields_anim.v_z, global_fields_anim.v_r,
+                            global_fields_anim.v_phi, global_fields_anim.e,
+                            global_fields_anim.H_z, global_fields_anim.H_r,
+                            global_fields_anim.H_phi, params.output_dir);
             }
 
             printf("Frame %d written (initial conditions, t=%.6f): %s\n", frame_count,
@@ -620,9 +628,10 @@ auto main(int argc, char* argv[]) -> int {
                                  global_grid_anim);
 
             if (domain.rank == 0) {
-                std::string filename =
-                    GenerateOutputFilename(params.output_format, frame_count, domain.size,
-                                           omp_get_max_threads());
+                std::string filename = GenerateOutputFilename(params.output_format, frame_count,
+                                                            domain.size, omp_get_max_threads(),
+                                                            params.filename_template,
+                                                            params.L_max_global, params.M_max, params.dt);
 
                 if (params.output_format == "vtk") {
                     WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
@@ -673,27 +682,29 @@ auto main(int argc, char* argv[]) -> int {
         GatherResultsToRank0(fields, grid, domain, params, global_fields, global_grid);
 
         if (domain.rank == 0) {
-            std::string final_filename = GenerateFinalOutputFilename(
-                params.output_format, domain.size, omp_get_max_threads());
+            std::string filename = GenerateOutputFilename(params.output_format, frame_count,
+                                                        domain.size, omp_get_max_threads(),
+                                                        params.filename_template,
+                                                        params.L_max_global, params.M_max, params.dt);
 
             if (params.output_format == "vtk") {
-                WriteVtk(final_filename.c_str(), params.L_max_global, params.M_max,
+                WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
                          params.dz, global_grid.r, global_fields.rho, global_fields.v_z,
                          global_fields.v_r, global_fields.v_phi, global_fields.e,
                          global_fields.H_z, global_fields.H_r, global_fields.H_phi,
                          params.output_dir);
                 printf("Final output written to: %s/%s\n", params.output_dir.c_str(),
-                       final_filename.c_str());
+                       filename.c_str());
             }
 
             if (params.output_format == "plt") {
-                WritePlt(final_filename.c_str(), params.L_max_global, params.M_max,
+                WritePlt(filename.c_str(), params.L_max_global, params.M_max,
                          params.dz, global_grid.r, global_fields.rho, global_fields.v_z,
                          global_fields.v_r, global_fields.v_phi, global_fields.e,
                          global_fields.H_z, global_fields.H_r, global_fields.H_phi,
                          params.output_dir);
                 printf("Final output written to: %s/%s\n", params.output_dir.c_str(),
-                       final_filename.c_str());
+                       filename.c_str());
             }
 
             // Clean up global arrays
@@ -707,9 +718,10 @@ auto main(int argc, char* argv[]) -> int {
                                  global_grid_anim);
 
             if (domain.rank == 0) {
-                std::string filename =
-                    GenerateOutputFilename(params.output_format, frame_count, domain.size,
-                                           omp_get_max_threads());
+                std::string filename = GenerateOutputFilename(params.output_format, frame_count,
+                                                            domain.size, omp_get_max_threads(),
+                                                            params.filename_template,
+                                                            params.L_max_global, params.M_max, params.dt);
 
                 if (params.output_format == "vtk") {
                     WriteVtk(filename.c_str(), params.L_max_global, params.M_max,

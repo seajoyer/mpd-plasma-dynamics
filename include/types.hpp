@@ -11,7 +11,8 @@ struct SimulationParams {
     int animation_frequency; // Output every N steps
     std::string output_format;  // vtk or plt
     std::string output_dir;     // Output directory
-    
+    std::string filename_template = "default"; 
+
     double convergence_threshold;
     int check_frequency;
     
