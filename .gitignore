@@ -7,3 +7,4 @@ results/
 flake.lock
 output/
 log/
+hw_info.sh
