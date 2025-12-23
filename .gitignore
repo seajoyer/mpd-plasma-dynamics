@@ -5,6 +5,6 @@
 build/
 results/
 flake.lock
-output/
+/output/
 log/
 hw_info.sh
