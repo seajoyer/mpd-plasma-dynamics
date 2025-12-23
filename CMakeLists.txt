@@ -21,6 +21,8 @@ add_executable(${NAME}
     src/mpi_comm.cpp
     src/output/write_vtk.cpp
     src/output/write_plt.cpp
+    src/output/write_results.cpp
+    src/integrals.cpp
     src/boundary.cpp
     src/solver.cpp
 )

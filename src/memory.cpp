@@ -40,3 +40,71 @@ void MemoryClearing2D(double** &array, int rows) {
     }
     delete[] array;
 }
+
+void AllocateFields(PhysicalFields& fields, int rows, int cols) {
+    MemoryAllocation2D(fields.rho, rows, cols);
+    MemoryAllocation2D(fields.v_r, rows, cols);
+    MemoryAllocation2D(fields.v_phi, rows, cols);
+    MemoryAllocation2D(fields.v_z, rows, cols);
+    MemoryAllocation2D(fields.e, rows, cols);
+    MemoryAllocation2D(fields.p, rows, cols);
+    MemoryAllocation2D(fields.P, rows, cols);
+    MemoryAllocation2D(fields.H_r, rows, cols);
+    MemoryAllocation2D(fields.H_phi, rows, cols);
+    MemoryAllocation2D(fields.H_z, rows, cols);
+}
+
+void DeallocateFields(PhysicalFields& fields, int rows) {
+    MemoryClearing2D(fields.rho, rows);
+    MemoryClearing2D(fields.v_r, rows);
+    MemoryClearing2D(fields.v_phi, rows);
+    MemoryClearing2D(fields.v_z, rows);
+    MemoryClearing2D(fields.e, rows);
+    MemoryClearing2D(fields.p, rows);
+    MemoryClearing2D(fields.P, rows);
+    MemoryClearing2D(fields.H_r, rows);
+    MemoryClearing2D(fields.H_phi, rows);
+    MemoryClearing2D(fields.H_z, rows);
+}
+
+void AllocateConservative(ConservativeVars& u, int rows, int cols) {
+    MemoryAllocation2D(u.u_1, rows, cols);
+    MemoryAllocation2D(u.u_2, rows, cols);
+    MemoryAllocation2D(u.u_3, rows, cols);
+    MemoryAllocation2D(u.u_4, rows, cols);
+    MemoryAllocation2D(u.u_5, rows, cols);
+    MemoryAllocation2D(u.u_6, rows, cols);
+    MemoryAllocation2D(u.u_7, rows, cols);
+    MemoryAllocation2D(u.u_8, rows, cols);
+}
+
+void DeallocateConservative(ConservativeVars& u, int rows) {
+    MemoryClearing2D(u.u_1, rows);
+    MemoryClearing2D(u.u_2, rows);
+    MemoryClearing2D(u.u_3, rows);
+    MemoryClearing2D(u.u_4, rows);
+    MemoryClearing2D(u.u_5, rows);
+    MemoryClearing2D(u.u_6, rows);
+    MemoryClearing2D(u.u_7, rows);
+    MemoryClearing2D(u.u_8, rows);
+}
+
+void AllocatePreviousState(PreviousState& prev, int rows, int cols) {
+    MemoryAllocation2D(prev.rho_prev, rows, cols);
+    MemoryAllocation2D(prev.v_z_prev, rows, cols);
+    MemoryAllocation2D(prev.v_r_prev, rows, cols);
+    MemoryAllocation2D(prev.v_phi_prev, rows, cols);
+    MemoryAllocation2D(prev.H_z_prev, rows, cols);
+    MemoryAllocation2D(prev.H_r_prev, rows, cols);
+    MemoryAllocation2D(prev.H_phi_prev, rows, cols);
+}
+
+void DeallocatePreviousState(PreviousState& prev, int rows) {
+    MemoryClearing2D(prev.rho_prev, rows);
+    MemoryClearing2D(prev.v_z_prev, rows);
+    MemoryClearing2D(prev.v_r_prev, rows);
+    MemoryClearing2D(prev.v_phi_prev, rows);
+    MemoryClearing2D(prev.H_z_prev, rows);
+    MemoryClearing2D(prev.H_r_prev, rows);
+    MemoryClearing2D(prev.H_phi_prev, rows);
+}
