@@ -15,6 +15,7 @@
 #include "physics.hpp"
 #include "solver.hpp"
 #include "types.hpp"
+#include "integrals.hpp"
 
 auto main(int argc, char* argv[]) -> int {
     // Initialize MPI
@@ -454,6 +455,23 @@ auto main(int argc, char* argv[]) -> int {
         end = MPI_Wtime();
         total = end - begin;
         printf("Calculation time : %lf sec\n", total);
+	printf("Mass flux : %f \n", GetMassFlux(
+				fields.rho[params.L_max_global],
+				fields.v_z[params.L_max_global],
+				grid.dr[params.L_max_global],
+				params.M_max
+				));
+
+	printf("Thrust : %f \n", GetThrust(
+				fields.rho[params.L_max_global],
+				fields.v_z[params.L_max_global],
+				fields.p[params.L_max_global],
+				fields.H_r[params.L_max_global],
+				fields.H_phi[params.L_max_global],
+				fields.H_z[params.L_max_global],
+				grid.dr[params.L_max_global],
+				params.M_max
+				));
         if (params.animate) {
             printf("Total animation frames generated: %d\n", frame_count);
         }
