@@ -25,6 +25,7 @@ add_executable(${NAME}
     src/integrals.cpp
     src/boundary.cpp
     src/solver.cpp
+    src/domain_decomposition.cpp
 )
 
 target_include_directories(${NAME}

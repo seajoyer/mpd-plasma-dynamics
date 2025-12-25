@@ -46,16 +46,6 @@ auto main(int argc, char* argv[]) -> int {
     params.dz = 1.0 / params.L_max_global;
     params.dy = 1.0 / params.M_max;
 
-    // Domain decomposition
-    domain.L_per_proc = params.L_max_global / domain.size;
-    domain.l_start = domain.rank * domain.L_per_proc;
-    domain.l_end = (domain.rank + 1) * domain.L_per_proc - 1;
-    if (domain.rank == domain.size - 1) {
-        domain.l_end = params.L_max_global - 1;
-    }
-    domain.local_L = domain.l_end - domain.l_start + 1;
-    domain.local_L_with_ghosts = domain.local_L + 2;
-
     // Parse command line arguments
     int procs = 1;
     if (argc > 1) {
@@ -118,19 +108,42 @@ auto main(int argc, char* argv[]) -> int {
 
     omp_set_num_threads(procs);
 
+    // ========================================================================
+    // Setup 2D Domain Decomposition
+    // ========================================================================
+    Setup2DDecomposition(domain, params);
+    
+    if (domain.rank == 0) {
+        printf("\n========================================\n");
+        printf("2D Domain Decomposition Configuration\n");
+        printf("========================================\n");
+        printf("Process grid: %d x %d (L x M)\n", domain.dims[0], domain.dims[1]);
+        printf("Global domain: %d x %d\n", params.L_max_global, params.M_max + 1);
+        printf("========================================\n\n");
+    }
+    
+    // Print detailed decomposition info (for debugging)
+    if (domain.rank == 0) {
+        PrintDecompositionInfo(domain, params);
+    }
+    MPI_Barrier(GetCartComm(domain));
+
     double begin, end, total;
 
-    // Allocate arrays
+    // ========================================================================
+    // Allocate arrays with 2D local dimensions
+    // ========================================================================
     PhysicalFields fields;
     ConservativeVars u, u0;
     GridGeometry grid;
 
-    AllocateFields(fields, domain.local_L_with_ghosts, params.M_max + 1);
-    AllocateConservative(u, domain.local_L_with_ghosts, params.M_max + 1);
-    AllocateConservative(u0, domain.local_L_with_ghosts, params.M_max + 1);
+    // Note: Now using local_L_with_ghosts x local_M_with_ghosts
+    AllocateFields(fields, domain.local_L_with_ghosts, domain.local_M_with_ghosts);
+    AllocateConservative(u, domain.local_L_with_ghosts, domain.local_M_with_ghosts);
+    AllocateConservative(u0, domain.local_L_with_ghosts, domain.local_M_with_ghosts);
 
-    MemoryAllocation2D(grid.r, domain.local_L_with_ghosts, params.M_max + 1);
-    MemoryAllocation2D(grid.r_z, domain.local_L_with_ghosts, params.M_max + 1);
+    MemoryAllocation2D(grid.r, domain.local_L_with_ghosts, domain.local_M_with_ghosts);
+    MemoryAllocation2D(grid.r_z, domain.local_L_with_ghosts, domain.local_M_with_ghosts);
     grid.R = new double[domain.local_L_with_ghosts];
     grid.dr = new double[domain.local_L_with_ghosts];
 
@@ -141,30 +154,38 @@ auto main(int argc, char* argv[]) -> int {
 
     PreviousState prev_state;
     if (params.convergence_threshold > 0) {
-        AllocatePreviousState(prev_state, domain.local_L_with_ghosts, params.M_max + 1);
+        AllocatePreviousState(prev_state, domain.local_L_with_ghosts, domain.local_M_with_ghosts);
     }
 
-    // Initialize grid geometry
+    // ========================================================================
+    // Initialize grid geometry with 2D local indexing
+    // ========================================================================
     double r_0 = (R1(0) + R2(0)) / 2.0;
 
     for (int l = 0; l < domain.local_L_with_ghosts; l++) {
-        int l_global = domain.l_start + l - 1;
+        int l_global = domain.l_start + l - 1;  // -1 for ghost cell offset
         double z = l_global * params.dz;
 
         grid.R[l] = R2(z) - R1(z);
         grid.dr[l] = grid.R[l] / params.M_max;
 
-        for (int m = 0; m < params.M_max + 1; m++) {
-            grid.r[l][m] = (1 - m * params.dy) * R1(z) + m * params.dy * R2(z);
-            grid.r_z[l][m] = (1 - m * params.dy) * DerR1(z) + m * params.dy * DerR2(z);
+        for (int m = 0; m < domain.local_M_with_ghosts; m++) {
+            int m_global = domain.m_start + m - 1;  // -1 for ghost cell offset
+            double y = static_cast<double>(m_global) / params.M_max;  // Normalized [0,1]
+            
+            grid.r[l][m] = (1 - y) * R1(z) + y * R2(z);
+            grid.r_z[l][m] = (1 - y) * DerR1(z) + y * DerR2(z);
         }
     }
 
-// Initialize physical fields
-#pragma omp parallel for collapse(2)
-    for (int l = 1; l < domain.local_L_with_ghosts - 1; l++) {
-        for (int m = 0; m < params.M_max + 1; m++) {
+    // ========================================================================
+    // Initialize physical fields with 2D local indexing
+    // ========================================================================
+    #pragma omp parallel for collapse(2)
+    for (int l = 1; l <= domain.local_L; l++) {
+        for (int m = 1; m <= domain.local_M; m++) {
             int l_global = domain.l_start + l - 1;
+            int m_global = domain.m_start + m - 1;
 
             fields.rho[l][m] = 1.0;
             fields.v_z[l][m] = 0.1;
@@ -184,9 +205,9 @@ auto main(int argc, char* argv[]) -> int {
 
     // Initialize previous state if convergence checking is enabled
     if (params.convergence_threshold > 0) {
-#pragma omp parallel for collapse(2)
+        #pragma omp parallel for collapse(2)
         for (int l = 0; l < domain.local_L_with_ghosts; l++) {
-            for (int m = 0; m < params.M_max + 1; m++) {
+            for (int m = 0; m < domain.local_M_with_ghosts; m++) {
                 prev_state.rho_prev[l][m] = fields.rho[l][m];
                 prev_state.v_z_prev[l][m] = fields.v_z[l][m];
                 prev_state.v_r_prev[l][m] = fields.v_r[l][m];
@@ -199,14 +220,15 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // Initialize conservative variables
-    InitializeConservativeVars(u0, fields, grid, domain.local_L_with_ghosts,
-                                 params.M_max);
+    InitializeConservativeVars2D(u0, fields, grid, domain);
 
-    // Initialize ghost cells for boundary ranks before first time step
-    if (domain.rank == 0) {
-// Copy first physical cell to left ghost cell
-#pragma omp parallel for
-        for (int m = 0; m < params.M_max + 1; m++) {
+    // ========================================================================
+    // Initialize ghost cells for boundary processes
+    // ========================================================================
+    // Left boundary ghost cells (z=0)
+    if (domain.is_left_boundary) {
+        #pragma omp parallel for
+        for (int m = 0; m < domain.local_M_with_ghosts; m++) {
             fields.rho[0][m] = fields.rho[1][m];
             fields.v_z[0][m] = fields.v_z[1][m];
             fields.v_r[0][m] = fields.v_r[1][m];
@@ -229,40 +251,83 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-    if (domain.rank == domain.size - 1) {
-// Copy last physical cell to right ghost cell
-#pragma omp parallel for
-        for (int m = 0; m < params.M_max + 1; m++) {
-            fields.rho[domain.local_L + 1][m] = fields.rho[domain.local_L][m];
-            fields.v_z[domain.local_L + 1][m] = fields.v_z[domain.local_L][m];
-            fields.v_r[domain.local_L + 1][m] = fields.v_r[domain.local_L][m];
-            fields.v_phi[domain.local_L + 1][m] = fields.v_phi[domain.local_L][m];
-            fields.H_phi[domain.local_L + 1][m] = fields.H_phi[domain.local_L][m];
-            fields.H_z[domain.local_L + 1][m] = fields.H_z[domain.local_L][m];
-            fields.H_r[domain.local_L + 1][m] = fields.H_r[domain.local_L][m];
-            fields.e[domain.local_L + 1][m] = fields.e[domain.local_L][m];
-            fields.p[domain.local_L + 1][m] = fields.p[domain.local_L][m];
-            fields.P[domain.local_L + 1][m] = fields.P[domain.local_L][m];
+    // Right boundary ghost cells (z=z_max)
+    if (domain.is_right_boundary) {
+        int l = domain.local_L;
+        #pragma omp parallel for
+        for (int m = 0; m < domain.local_M_with_ghosts; m++) {
+            fields.rho[l + 1][m] = fields.rho[l][m];
+            fields.v_z[l + 1][m] = fields.v_z[l][m];
+            fields.v_r[l + 1][m] = fields.v_r[l][m];
+            fields.v_phi[l + 1][m] = fields.v_phi[l][m];
+            fields.H_phi[l + 1][m] = fields.H_phi[l][m];
+            fields.H_z[l + 1][m] = fields.H_z[l][m];
+            fields.H_r[l + 1][m] = fields.H_r[l][m];
+            fields.e[l + 1][m] = fields.e[l][m];
+            fields.p[l + 1][m] = fields.p[l][m];
+            fields.P[l + 1][m] = fields.P[l][m];
 
-            u0.u_1[domain.local_L + 1][m] =
-                fields.rho[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
-            u0.u_2[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] *
-                                            fields.v_z[domain.local_L + 1][m] *
-                                            grid.r[domain.local_L + 1][m];
-            u0.u_3[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] *
-                                            fields.v_r[domain.local_L + 1][m] *
-                                            grid.r[domain.local_L + 1][m];
-            u0.u_4[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] *
-                                            fields.v_phi[domain.local_L + 1][m] *
-                                            grid.r[domain.local_L + 1][m];
-            u0.u_5[domain.local_L + 1][m] = fields.rho[domain.local_L + 1][m] *
-                                            fields.e[domain.local_L + 1][m] *
-                                            grid.r[domain.local_L + 1][m];
-            u0.u_6[domain.local_L + 1][m] = fields.H_phi[domain.local_L + 1][m];
-            u0.u_7[domain.local_L + 1][m] =
-                fields.H_z[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
-            u0.u_8[domain.local_L + 1][m] =
-                fields.H_r[domain.local_L + 1][m] * grid.r[domain.local_L + 1][m];
+            u0.u_1[l + 1][m] = fields.rho[l + 1][m] * grid.r[l + 1][m];
+            u0.u_2[l + 1][m] = fields.rho[l + 1][m] * fields.v_z[l + 1][m] * grid.r[l + 1][m];
+            u0.u_3[l + 1][m] = fields.rho[l + 1][m] * fields.v_r[l + 1][m] * grid.r[l + 1][m];
+            u0.u_4[l + 1][m] = fields.rho[l + 1][m] * fields.v_phi[l + 1][m] * grid.r[l + 1][m];
+            u0.u_5[l + 1][m] = fields.rho[l + 1][m] * fields.e[l + 1][m] * grid.r[l + 1][m];
+            u0.u_6[l + 1][m] = fields.H_phi[l + 1][m];
+            u0.u_7[l + 1][m] = fields.H_z[l + 1][m] * grid.r[l + 1][m];
+            u0.u_8[l + 1][m] = fields.H_r[l + 1][m] * grid.r[l + 1][m];
+        }
+    }
+
+    // Bottom boundary ghost cells (m=0)
+    if (domain.is_down_boundary) {
+        #pragma omp parallel for
+        for (int l = 0; l < domain.local_L_with_ghosts; l++) {
+            fields.rho[l][0] = fields.rho[l][1];
+            fields.v_z[l][0] = fields.v_z[l][1];
+            fields.v_r[l][0] = fields.v_r[l][1];
+            fields.v_phi[l][0] = fields.v_phi[l][1];
+            fields.H_phi[l][0] = fields.H_phi[l][1];
+            fields.H_z[l][0] = fields.H_z[l][1];
+            fields.H_r[l][0] = fields.H_r[l][1];
+            fields.e[l][0] = fields.e[l][1];
+            fields.p[l][0] = fields.p[l][1];
+            fields.P[l][0] = fields.P[l][1];
+
+            u0.u_1[l][0] = u0.u_1[l][1];
+            u0.u_2[l][0] = u0.u_2[l][1];
+            u0.u_3[l][0] = u0.u_3[l][1];
+            u0.u_4[l][0] = u0.u_4[l][1];
+            u0.u_5[l][0] = u0.u_5[l][1];
+            u0.u_6[l][0] = u0.u_6[l][1];
+            u0.u_7[l][0] = u0.u_7[l][1];
+            u0.u_8[l][0] = u0.u_8[l][1];
+        }
+    }
+
+    // Top boundary ghost cells (m=M_max)
+    if (domain.is_up_boundary) {
+        int m = domain.local_M;
+        #pragma omp parallel for
+        for (int l = 0; l < domain.local_L_with_ghosts; l++) {
+            fields.rho[l][m + 1] = fields.rho[l][m];
+            fields.v_z[l][m + 1] = fields.v_z[l][m];
+            fields.v_r[l][m + 1] = fields.v_r[l][m];
+            fields.v_phi[l][m + 1] = fields.v_phi[l][m];
+            fields.H_phi[l][m + 1] = fields.H_phi[l][m];
+            fields.H_z[l][m + 1] = fields.H_z[l][m];
+            fields.H_r[l][m + 1] = fields.H_r[l][m];
+            fields.e[l][m + 1] = fields.e[l][m];
+            fields.p[l][m + 1] = fields.p[l][m];
+            fields.P[l][m + 1] = fields.P[l][m];
+
+            u0.u_1[l][m + 1] = u0.u_1[l][m];
+            u0.u_2[l][m + 1] = u0.u_2[l][m];
+            u0.u_3[l][m + 1] = u0.u_3[l][m];
+            u0.u_4[l][m + 1] = u0.u_4[l][m];
+            u0.u_5[l][m + 1] = u0.u_5[l][m];
+            u0.u_6[l][m + 1] = u0.u_6[l][m];
+            u0.u_7[l][m + 1] = u0.u_7[l][m];
+            u0.u_8[l][m + 1] = u0.u_8[l][m];
         }
     }
 
@@ -282,8 +347,7 @@ auto main(int argc, char* argv[]) -> int {
 
     if (domain.rank == 0 && params.animate) {
         AllocateFields(global_fields_anim, params.L_max_global + 1, params.M_max + 1);
-        MemoryAllocation2D(global_grid_anim.r, params.L_max_global + 1,
-                             params.M_max + 1);
+        MemoryAllocation2D(global_grid_anim.r, params.L_max_global + 1, params.M_max + 1);
 
         printf("Animation enabled: will output every %d steps\n",
                params.animation_frequency);
@@ -292,8 +356,8 @@ auto main(int argc, char* argv[]) -> int {
 
     // Output initial conditions as frame 0 if animation is enabled
     if (params.animate) {
-        GatherResultsToRank0(fields, grid, domain, params, global_fields_anim,
-                             global_grid_anim);
+        GatherResultsToRank0_2D(fields, grid, domain, params, global_fields_anim,
+                                global_grid_anim);
 
         if (domain.rank == 0) {
             std::string filename = GenerateOutputFilename(params.output_format, frame_count,
@@ -303,18 +367,18 @@ auto main(int argc, char* argv[]) -> int {
 
             if (params.output_format == "vtk") {
                 WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
-                            params.dz, global_grid_anim.r, global_fields_anim.rho,
-                            global_fields_anim.v_z, global_fields_anim.v_r,
-                            global_fields_anim.v_phi, global_fields_anim.e,
-                            global_fields_anim.H_z, global_fields_anim.H_r,
-                            global_fields_anim.H_phi, params.output_dir);
+                         params.dz, global_grid_anim.r, global_fields_anim.rho,
+                         global_fields_anim.v_z, global_fields_anim.v_r,
+                         global_fields_anim.v_phi, global_fields_anim.e,
+                         global_fields_anim.H_z, global_fields_anim.H_r,
+                         global_fields_anim.H_phi, params.output_dir);
             } else if (params.output_format == "plt") {
                 WritePlt(filename.c_str(), params.L_max_global, params.M_max,
-                            params.dz, global_grid_anim.r, global_fields_anim.rho,
-                            global_fields_anim.v_z, global_fields_anim.v_r,
-                            global_fields_anim.v_phi, global_fields_anim.e,
-                            global_fields_anim.H_z, global_fields_anim.H_r,
-                            global_fields_anim.H_phi, params.output_dir);
+                         params.dz, global_grid_anim.r, global_fields_anim.rho,
+                         global_fields_anim.v_z, global_fields_anim.v_r,
+                         global_fields_anim.v_phi, global_fields_anim.e,
+                         global_fields_anim.H_z, global_fields_anim.H_r,
+                         global_fields_anim.H_phi, params.output_dir);
             }
 
             printf("Frame %d written (initial conditions, t=%.6f): %s\n", frame_count,
@@ -323,37 +387,35 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-    // Main time loop
+    // ========================================================================
+    // Main time loop using 2D decomposition functions
+    // ========================================================================
+    MPI_Comm cart_comm = GetCartComm(domain);
+    
     while (t < params.T && !converged) {
-        // Exchange ghost cells
-        ExchangeGhostCellsConservative(u0, domain, params.M_max);
-        ExchangeGhostCellsPhysical(fields, domain, params.M_max);
+        // Exchange ghost cells in both L and M directions
+        ExchangeGhostCellsConservative2D(u0, domain, params);
+        ExchangeGhostCellsPhysical2D(fields, domain, params);
 
         // Compute one time step
-        ComputeTimeStep(u, u0, fields, grid, domain, params);
+        ComputeTimeStep2D(u, u0, fields, grid, domain, params);
 
-        // Update central part
-        UpdatePhysicalFields(fields, u, grid, domain.local_L + 2, params.M_max,
-                               params.gamma);
+        // Update physical fields in interior
+        UpdatePhysicalFields2D(fields, u, grid, domain, params.gamma);
 
-        // Apply boundary conditions
-        ApplyBoundaryConditions(fields, u, grid, domain, params, r_0);
+        // Apply boundary conditions based on 2D position
+        ApplyBoundaryConditions2D(fields, u, grid, domain, params, r_0);
 
-        // Data update
-        UpdatePhysicalFields(fields, u, grid, domain.local_L_with_ghosts, params.M_max,
-                               params.gamma);
+        // Update physical fields including boundaries
+        UpdatePhysicalFields2D(fields, u, grid, domain, params.gamma);
 
         // Copy u to u0
-        CopyConservativeVars(u0, u, domain.local_L_with_ghosts, params.M_max);
+        CopyConservativeVars2D(u0, u, domain);
 
         // Convergence check
         if (params.convergence_threshold > 0 &&
             step_count % params.check_frequency == 0) {
-            double change = ComputeSolutionChange(
-                fields.rho, prev_state.rho_prev, fields.v_z, prev_state.v_z_prev,
-                fields.v_r, prev_state.v_r_prev, fields.v_phi, prev_state.v_phi_prev,
-                fields.H_z, prev_state.H_z_prev, fields.H_r, prev_state.H_r_prev,
-                fields.H_phi, prev_state.H_phi_prev, domain.local_L, params.M_max);
+            double change = ComputeSolutionChange2D(fields, prev_state, domain);
 
             if (domain.rank == 0) {
                 printf("Step %d, t=%.6f, relative change: %.6e\n", step_count, t, change);
@@ -366,10 +428,10 @@ auto main(int argc, char* argv[]) -> int {
                 }
             }
 
-// Update previous state
-#pragma omp parallel for collapse(2)
-            for (int l = 1; l < domain.local_L + 1; l++) {
-                for (int m = 0; m < params.M_max + 1; m++) {
+            // Update previous state
+            #pragma omp parallel for collapse(2)
+            for (int l = 1; l <= domain.local_L; l++) {
+                for (int m = 1; m <= domain.local_M; m++) {
                     prev_state.rho_prev[l][m] = fields.rho[l][m];
                     prev_state.v_z_prev[l][m] = fields.v_z[l][m];
                     prev_state.v_r_prev[l][m] = fields.v_r[l][m];
@@ -383,9 +445,7 @@ auto main(int argc, char* argv[]) -> int {
 
         // CFL stability check (every 100 steps)
         if (step_count % 100 == 0) {
-            double max_wave_speed = ComputeMaxWaveSpeed(
-                fields.rho, fields.v_z, fields.v_r, fields.v_phi, fields.H_z, fields.H_r,
-                fields.H_phi, fields.p, domain.local_L, params.M_max, params.gamma);
+            double max_wave_speed = ComputeMaxWaveSpeed2D(fields, domain, params.gamma);
             double dx = std::min(params.dz, params.dy);
             double CFL_number = 0.5;
             double dt_max = CFL_number * dx / (max_wave_speed + 1e-10);
@@ -400,25 +460,32 @@ auto main(int argc, char* argv[]) -> int {
         t += params.dt;
         step_count++;
 
-        // Debug output
-        if (domain.rank == 0 && step_count % 1000 == 0) {
-            int check_l = 20;
-            int check_m = 40;
-            if (check_l >= domain.l_start && check_l <= domain.l_end) {
-                int local_check_l = check_l - domain.l_start + 1;
-                printf("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t,
-                       fields.rho[local_check_l][check_m],
-                       fields.v_z[local_check_l][check_m],
-                       fields.v_phi[local_check_l][check_m],
-                       fields.e[local_check_l][check_m],
-                       fields.H_phi[local_check_l][check_m]);
+        // Debug output (only from rank 0, and only if it owns the check point)
+        if (step_count % 1000 == 0) {
+            int check_l_global = 20;
+            int check_m_global = 40;
+            
+            // Check if this process owns the debug point
+            bool owns_point = (check_l_global >= domain.l_start && check_l_global <= domain.l_end &&
+                              check_m_global >= domain.m_start && check_m_global <= domain.m_end);
+            
+            if (owns_point) {
+                int local_check_l = check_l_global - domain.l_start + 1;
+                int local_check_m = check_m_global - domain.m_start + 1;
+                printf("Rank %d: t=%lf\trho=%lf\tv_z=%lf\tv_phi=%lf\te=%lf\tH_phi=%lf\n", 
+                       domain.rank, t,
+                       fields.rho[local_check_l][local_check_m],
+                       fields.v_z[local_check_l][local_check_m],
+                       fields.v_phi[local_check_l][local_check_m],
+                       fields.e[local_check_l][local_check_m],
+                       fields.H_phi[local_check_l][local_check_m]);
             }
         }
 
         // Animation output
         if (params.animate && step_count % params.animation_frequency == 0) {
-            GatherResultsToRank0(fields, grid, domain, params, global_fields_anim,
-                                 global_grid_anim);
+            GatherResultsToRank0_2D(fields, grid, domain, params, global_fields_anim,
+                                    global_grid_anim);
 
             if (domain.rank == 0) {
                 std::string filename = GenerateOutputFilename(params.output_format, frame_count,
@@ -459,9 +526,51 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-    // Write final output file (always written, regardless of animation mode)
-    WriteFinalOutput(fields, grid, domain, params, global_fields_anim, global_grid_anim,
-                     step_count, frame_count, t);
+    // Write final output file
+    // Note: WriteFinalOutput needs to be updated for 2D - for now use direct gather
+    {
+        PhysicalFields global_fields;
+        GridGeometry global_grid;
+
+        if (domain.rank == 0) {
+            AllocateFields(global_fields, params.L_max_global + 1, params.M_max + 1);
+            MemoryAllocation2D(global_grid.r, params.L_max_global + 1, params.M_max + 1);
+        }
+
+        GatherResultsToRank0_2D(fields, grid, domain, params, global_fields, global_grid);
+
+        if (domain.rank == 0) {
+            std::string filename = GenerateOutputFilename(
+                params.output_format, frame_count, domain.size, omp_get_max_threads(),
+                params.filename_template, params.L_max_global, params.M_max, params.dt);
+
+            if (params.output_format == "vtk") {
+                WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
+                         params.dz, global_grid.r, global_fields.rho,
+                         global_fields.v_z, global_fields.v_r, global_fields.v_phi,
+                         global_fields.e, global_fields.H_z, global_fields.H_r,
+                         global_fields.H_phi, params.output_dir);
+            } else if (params.output_format == "plt") {
+                WritePlt(filename.c_str(), params.L_max_global, params.M_max,
+                         params.dz, global_grid.r, global_fields.rho,
+                         global_fields.v_z, global_fields.v_r, global_fields.v_phi,
+                         global_fields.e, global_fields.H_z, global_fields.H_r,
+                         global_fields.H_phi, params.output_dir);
+            }
+
+            printf("Final output written to: %s/%s\n", params.output_dir.c_str(),
+                   filename.c_str());
+
+            DeallocateFields(global_fields, params.L_max_global + 1);
+            MemoryClearing2D(global_grid.r, params.L_max_global + 1);
+        }
+    }
+
+    // Clean up animation arrays if allocated
+    if (domain.rank == 0 && params.animate) {
+        DeallocateFields(global_fields_anim, params.L_max_global + 1);
+        MemoryClearing2D(global_grid_anim.r, params.L_max_global + 1);
+    }
 
     // Clean up local arrays
     DeallocateFields(fields, domain.local_L_with_ghosts);
@@ -477,6 +586,9 @@ auto main(int argc, char* argv[]) -> int {
         DeallocatePreviousState(prev_state, domain.local_L_with_ghosts);
     }
 
+    // Free the Cartesian communicator
+    MPI_Comm_free(&cart_comm);
+    
     MPI_Finalize();
     return 0;
 }

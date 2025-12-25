@@ -27,15 +27,42 @@ struct SimulationParams {
     double dy;              // Grid spacing in r (normalized)
 };
 
-// MPI domain decomposition info
+// MPI domain decomposition info - Extended for 2D decomposition
 struct DomainInfo {
-    int rank;
-    int size;
-    int L_per_proc;
-    int l_start;
-    int l_end;
-    int local_L;
-    int local_L_with_ghosts;
+    int rank;               // Global rank in MPI_COMM_WORLD
+    int size;               // Total number of processes
+    
+    // Cartesian topology
+    int cart_rank;          // Rank in Cartesian communicator
+    int dims[2];            // Number of processes in each dimension [L, M]
+    int coords[2];          // This process's coordinates in the grid [L, M]
+    int cart_comm;          // Cartesian communicator (stored as int for POD compatibility)
+    
+    // L-direction (axial) decomposition
+    int L_per_proc;         // Base cells per process in L
+    int l_start;            // Global starting L index
+    int l_end;              // Global ending L index
+    int local_L;            // Number of local L cells (excluding ghosts)
+    int local_L_with_ghosts;// Including ghost cells
+    
+    // M-direction (radial) decomposition  
+    int M_per_proc;         // Base cells per process in M
+    int m_start;            // Global starting M index
+    int m_end;              // Global ending M index
+    int local_M;            // Number of local M cells (excluding ghosts)
+    int local_M_with_ghosts;// Including ghost cells
+    
+    // Neighbor ranks in Cartesian topology (-1 if boundary)
+    int neighbor_left;      // L-1 direction (z-)
+    int neighbor_right;     // L+1 direction (z+)
+    int neighbor_down;      // M-1 direction (r-, inner wall)
+    int neighbor_up;        // M+1 direction (r+, outer wall)
+    
+    // Boundary flags - true if this process is at a domain boundary
+    bool is_left_boundary;  // At z = 0 (inlet)
+    bool is_right_boundary; // At z = z_max (outlet)
+    bool is_down_boundary;  // At r = r_inner (inner wall/axis)
+    bool is_up_boundary;    // At r = r_outer (outer wall)
 };
 
 // Physical field arrays (local domain with ghost cells)
@@ -68,8 +95,8 @@ struct ConservativeVars {
 struct GridGeometry {
     double **r;             // Radial coordinate
     double **r_z;           // Derivative of r with respect to z
-    double *R;              // R = r2 - r1
-    double *dr;             // Grid spacing in r-direction
+    double *R;              // R = r2 - r1 (per local L index)
+    double *dr;             // Grid spacing in r-direction (per local L index)
 };
 
 // Previous state for convergence checking

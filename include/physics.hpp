@@ -1,11 +1,19 @@
 #pragma once
+#include "types.hpp"
 
-// Compute maximum wave speed for CFL condition
+// Compute maximum wave speed for CFL condition (2D version)
+double ComputeMaxWaveSpeed2D(const PhysicalFields& fields, const DomainInfo& domain,
+                              double gamma);
+
+// Compute relative solution change for convergence checking (2D version)
+double ComputeSolutionChange2D(const PhysicalFields& fields, const PreviousState& prev,
+                                const DomainInfo& domain);
+
+// Legacy 1D versions (kept for compatibility)
 auto ComputeMaxWaveSpeed(double **rho, double **v_z, double **v_r, double **v_phi,
                                double **H_z, double **H_r, double **H_phi, double **p,
                                int local_L, int M_max, double gamma) -> double;
 
-// Compute relative solution change for convergence checking
 auto ComputeSolutionChange(double **rho_curr, double **rho_prev,
                                 double **v_z_curr, double **v_z_prev,
                                 double **v_r_curr, double **v_r_prev,
