@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <mpi.h>
 
 // Simulation parameters
 struct SimulationParams {
@@ -36,7 +37,7 @@ struct DomainInfo {
     int cart_rank;          // Rank in Cartesian communicator
     int dims[2];            // Number of processes in each dimension [L, M]
     int coords[2];          // This process's coordinates in the grid [L, M]
-    int cart_comm;          // Cartesian communicator (stored as int for POD compatibility)
+    MPI_Comm cart_comm;     // Cartesian communicator
     
     // L-direction (axial) decomposition
     int L_per_proc;         // Base cells per process in L

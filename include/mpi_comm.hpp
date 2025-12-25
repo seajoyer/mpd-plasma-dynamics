@@ -1,34 +1,7 @@
 #pragma once
 #include "types.hpp"
+#include "domain_decomposition.hpp"
 #include <mpi.h>
-
-// ============================================================================
-// 2D Domain Decomposition Setup
-// ============================================================================
-
-/**
- * @brief Initialize 2D Cartesian topology for domain decomposition
- * 
- * Creates a 2D Cartesian communicator and sets up neighbor relationships.
- * The decomposition prioritizes balance in the L direction first, then M.
- * 
- * @param domain Domain info structure to populate
- * @param params Simulation parameters with global grid dimensions
- */
-void Setup2DDecomposition(DomainInfo& domain, const SimulationParams& params);
-
-/**
- * @brief Compute optimal process grid dimensions
- * 
- * Finds dims[0] x dims[1] = size that best matches the aspect ratio
- * of the computational domain (L_max x M_max) for load balancing.
- * 
- * @param size Total number of MPI processes
- * @param L_max Global L dimension
- * @param M_max Global M dimension
- * @param dims Output array for dimensions [L_procs, M_procs]
- */
-void ComputeOptimalDims(int size, int L_max, int M_max, int dims[2]);
 
 // ============================================================================
 // Ghost Cell Exchange - 2D Version
@@ -96,13 +69,8 @@ void ExchangeGhostCellsPhysical(PhysicalFields& fields, const DomainInfo& domain
 // ============================================================================
 
 /**
- * @brief Get the Cartesian communicator as MPI_Comm type
+ * @brief Get the Cartesian communicator
  */
 inline MPI_Comm GetCartComm(const DomainInfo& domain) {
-    return static_cast<MPI_Comm>(domain.cart_comm);
+    return domain.cart_comm;
 }
-
-/**
- * @brief Print domain decomposition info (for debugging)
- */
-void PrintDecompositionInfo(const DomainInfo& domain, const SimulationParams& params);

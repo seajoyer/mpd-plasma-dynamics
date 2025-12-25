@@ -1,97 +1,144 @@
-#include "types.hpp"
-#include <mpi.h>
-#include <cstdio>
 #include "domain_decomposition.hpp"
+#include <mpi.h>
+#include <cmath>
+#include <cstdio>
+#include <algorithm>
 
-void SetupCartesianTopology(DomainInfo& domain, int total_procs) {
-    // Initialize dimensions to 0 (MPI will determine optimal split)
-    domain.dims[0] = 0;  // P_L (L-direction)
-    domain.dims[1] = 0;  // P_M (M-direction)
+void ComputeOptimalDims(int size, int L_max, int M_max, int dims[2]) {
+    // Find factorization that best matches domain aspect ratio
+    double domain_ratio = static_cast<double>(L_max) / static_cast<double>(M_max);
     
-    // Let MPI determine optimal 2D decomposition
-    MPI_Dims_create(total_procs, 2, domain.dims);
+    int best_dims[2] = {size, 1};
+    double best_ratio_diff = std::abs(static_cast<double>(size) - domain_ratio);
     
-    // Optional: Manually optimize for L:M aspect ratio (800:400 = 2:1)
-    // Prefer more processes in L-direction
-    if (domain.dims[0] < domain.dims[1]) {
-        int temp = domain.dims[0];
-        domain.dims[0] = domain.dims[1];
-        domain.dims[1] = temp;
+    for (int i = 1; i <= static_cast<int>(std::sqrt(size)); i++) {
+        if (size % i == 0) {
+            int j = size / i;
+            
+            // Try both orientations: (i, j) and (j, i)
+            // dims[0] = L direction, dims[1] = M direction
+            double ratio1 = static_cast<double>(j) / static_cast<double>(i);
+            double ratio2 = static_cast<double>(i) / static_cast<double>(j);
+            
+            double diff1 = std::abs(ratio1 - domain_ratio);
+            double diff2 = std::abs(ratio2 - domain_ratio);
+            
+            if (diff1 < best_ratio_diff) {
+                best_ratio_diff = diff1;
+                best_dims[0] = j;  // More processes in L direction
+                best_dims[1] = i;
+            }
+            if (diff2 < best_ratio_diff) {
+                best_ratio_diff = diff2;
+                best_dims[0] = i;
+                best_dims[1] = j;
+            }
+        }
     }
     
-    // Create Cartesian communicator (non-periodic boundaries)
+    dims[0] = best_dims[0];
+    dims[1] = best_dims[1];
+}
+
+void SetupCartesianTopology(DomainInfo& domain, int L_max, int M_max) {
+    // Get basic MPI info first
+    MPI_Comm_rank(MPI_COMM_WORLD, &domain.rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &domain.size);
+    
+    // Compute optimal grid dimensions
+    ComputeOptimalDims(domain.size, L_max, M_max, domain.dims);
+    
+    // Create 2D Cartesian topology
+    // periods = {0, 0} - no periodic boundaries
     int periods[2] = {0, 0};
-    int reorder = 1;  // Allow MPI to reorder ranks for better performance
+    int reorder = 1;  // Allow MPI to reorder ranks for efficiency
     
     MPI_Cart_create(MPI_COMM_WORLD, 2, domain.dims, periods, reorder, &domain.cart_comm);
     
-    // Get this process's rank and coordinates in the Cartesian grid
-    MPI_Comm_rank(domain.cart_comm, &domain.rank);
-    MPI_Cart_coords(domain.cart_comm, domain.rank, 2, domain.coords);
+    // Get this process's coordinates and rank in the Cartesian grid
+    MPI_Comm_rank(domain.cart_comm, &domain.cart_rank);
+    MPI_Cart_coords(domain.cart_comm, domain.cart_rank, 2, domain.coords);
     
-    // Get neighbor ranks
-    MPI_Cart_shift(domain.cart_comm, 0, 1, &domain.rank_left, &domain.rank_right);
-    MPI_Cart_shift(domain.cart_comm, 1, 1, &domain.rank_down, &domain.rank_up);
+    // Get neighbor ranks using MPI_Cart_shift
+    // L direction (dimension 0): left = -1, right = +1
+    MPI_Cart_shift(domain.cart_comm, 0, 1, &domain.neighbor_left, &domain.neighbor_right);
+    // M direction (dimension 1): down = -1, up = +1
+    MPI_Cart_shift(domain.cart_comm, 1, 1, &domain.neighbor_down, &domain.neighbor_up);
     
-    // Store total number of processes
-    MPI_Comm_size(domain.cart_comm, &domain.size);
-    
-    if (domain.rank == 0) {
-        printf("=== 2D Domain Decomposition Setup ===\n");
-        printf("Total processes: %d\n", total_procs);
-        printf("Process grid: %d x %d (L x M)\n", domain.dims[0], domain.dims[1]);
-        printf("====================================\n\n");
-    }
+    // Set boundary flags based on neighbor existence
+    // MPI_Cart_shift returns MPI_PROC_NULL (-2 typically) for non-existent neighbors
+    domain.is_left_boundary = (domain.neighbor_left == MPI_PROC_NULL);
+    domain.is_right_boundary = (domain.neighbor_right == MPI_PROC_NULL);
+    domain.is_down_boundary = (domain.neighbor_down == MPI_PROC_NULL);
+    domain.is_up_boundary = (domain.neighbor_up == MPI_PROC_NULL);
 }
 
-void SetupDomainDecomposition(DomainInfo& domain, SimulationParams& params) {
-    // L-dimension decomposition
-    domain.L_per_proc = params.L_max_global / domain.dims[0];
-    domain.l_start = domain.coords[0] * domain.L_per_proc;
-    domain.l_end = (domain.coords[0] + 1) * domain.L_per_proc - 1;
+void ComputeLocalDomainExtents(DomainInfo& domain, int L_max_global, int M_max) {
+    // Compute L-direction decomposition
+    domain.L_per_proc = L_max_global / domain.dims[0];
+    int L_remainder = L_max_global % domain.dims[0];
     
-    // Handle remainder cells for last process in L-direction
-    if (domain.coords[0] == domain.dims[0] - 1) {
-        domain.l_end = params.L_max_global - 1;
+    // Distribute remainder to first L_remainder processes in L direction
+    if (domain.coords[0] < L_remainder) {
+        domain.local_L = domain.L_per_proc + 1;
+        domain.l_start = domain.coords[0] * (domain.L_per_proc + 1);
+    } else {
+        domain.local_L = domain.L_per_proc;
+        domain.l_start = L_remainder * (domain.L_per_proc + 1) + 
+                         (domain.coords[0] - L_remainder) * domain.L_per_proc;
     }
+    domain.l_end = domain.l_start + domain.local_L - 1;
+    domain.local_L_with_ghosts = domain.local_L + 2;  // One ghost on each side
     
-    domain.local_L = domain.l_end - domain.l_start + 1;
-    domain.local_L_with_ghosts = domain.local_L + 2;
+    // Compute M-direction decomposition
+    int M_total = M_max + 1;  // M goes from 0 to M_max inclusive
+    domain.M_per_proc = M_total / domain.dims[1];
+    int M_remainder = M_total % domain.dims[1];
     
-    // M-dimension decomposition
-    domain.M_per_proc = params.M_max / domain.dims[1];
-    domain.m_start = domain.coords[1] * domain.M_per_proc;
-    domain.m_end = (domain.coords[1] + 1) * domain.M_per_proc - 1;
-    
-    // Handle remainder cells for last process in M-direction
-    if (domain.coords[1] == domain.dims[1] - 1) {
-        domain.m_end = params.M_max;
+    // Distribute remainder to first M_remainder processes in M direction
+    if (domain.coords[1] < M_remainder) {
+        domain.local_M = domain.M_per_proc + 1;
+        domain.m_start = domain.coords[1] * (domain.M_per_proc + 1);
+    } else {
+        domain.local_M = domain.M_per_proc;
+        domain.m_start = M_remainder * (domain.M_per_proc + 1) + 
+                         (domain.coords[1] - M_remainder) * domain.M_per_proc;
     }
-    
-    domain.local_M = domain.m_end - domain.m_start + 1;
-    domain.local_M_with_ghosts = domain.local_M + 2;
-    
-    // Debug output
-    if (domain.rank == 0) {
-        printf("Rank %d: coords=(%d,%d), L=[%d,%d] (%d cells), M=[%d,%d] (%d cells)\n",
-               domain.rank, domain.coords[0], domain.coords[1],
-               domain.l_start, domain.l_end, domain.local_L,
-               domain.m_start, domain.m_end, domain.local_M);
-    }
+    domain.m_end = domain.m_start + domain.local_M - 1;
+    domain.local_M_with_ghosts = domain.local_M + 2;  // One ghost on each side
 }
 
-void PrintDomainInfo(const DomainInfo& domain) {
-    // Each rank prints its domain info (synchronized)
+void Setup2DDecomposition(DomainInfo& domain, const SimulationParams& params) {
+    // Set up Cartesian topology
+    SetupCartesianTopology(domain, params.L_max_global, params.M_max + 1);
+    
+    // Compute local domain extents
+    ComputeLocalDomainExtents(domain, params.L_max_global, params.M_max);
+}
+
+void PrintDecompositionInfo(const DomainInfo& domain, const SimulationParams& params) {
+    // Print from each rank in order
     for (int r = 0; r < domain.size; r++) {
         if (domain.rank == r) {
-            printf("Rank %2d: coords=(%d,%d) | L=[%3d,%3d] (%3d) | M=[%3d,%3d] (%3d) | "
-                   "Neighbors: L=%2d R=%2d D=%2d U=%2d\n",
-                   domain.rank, domain.coords[0], domain.coords[1],
-                   domain.l_start, domain.l_end, domain.local_L,
-                   domain.m_start, domain.m_end, domain.local_M,
-                   domain.rank_left, domain.rank_right, domain.rank_down, domain.rank_up);
+            printf("Rank %d (cart_rank %d): coords=(%d,%d)\n",
+                   domain.rank, domain.cart_rank, domain.coords[0], domain.coords[1]);
+            printf("  L: [%d,%d] (%d cells + 2 ghosts)\n",
+                   domain.l_start, domain.l_end, domain.local_L);
+            printf("  M: [%d,%d] (%d cells + 2 ghosts)\n",
+                   domain.m_start, domain.m_end, domain.local_M);
+            printf("  Neighbors: left=%d, right=%d, down=%d, up=%d\n",
+                   domain.neighbor_left, domain.neighbor_right,
+                   domain.neighbor_down, domain.neighbor_up);
+            printf("  Boundaries: left=%d, right=%d, down=%d, up=%d\n",
+                   domain.is_left_boundary, domain.is_right_boundary,
+                   domain.is_down_boundary, domain.is_up_boundary);
             fflush(stdout);
         }
         MPI_Barrier(domain.cart_comm);
+    }
+    
+    if (domain.rank == 0) {
+        printf("\n2D Decomposition: %d x %d processes for %d x %d domain\n",
+               domain.dims[0], domain.dims[1], params.L_max_global, params.M_max + 1);
     }
 }
