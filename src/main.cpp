@@ -6,6 +6,7 @@
 #include <string>
 
 #include "boundary.hpp"
+#include "decomposition.hpp"
 #include "geometry.hpp"
 #include "memory.hpp"
 #include "mpi_comm.hpp"
@@ -48,14 +49,42 @@ auto main(int argc, char* argv[]) -> int {
     params.dy = 1.0 / params.M_max;
 
     // Domain decomposition
-    domain.L_per_proc = params.L_max_global / domain.size;
-    domain.l_start = domain.rank * domain.L_per_proc;
-    domain.l_end = (domain.rank + 1) * domain.L_per_proc - 1;
-    if (domain.rank == domain.size - 1) {
-        domain.l_end = params.L_max_global - 1;
-    }
-    domain.local_L = domain.l_end - domain.l_start + 1;
+    // Domain decomposition with balanced load distribution
+    ComputeBalancedDecomposition(params.L_max_global, domain.size, domain.rank,
+                                 domain.l_start, domain.l_end, domain.local_L);
     domain.local_L_with_ghosts = domain.local_L + 2;
+    
+    // For backward compatibility (though not strictly needed)
+    domain.L_per_proc = params.L_max_global / domain.size;
+    
+    // Print decomposition info for verification
+    if (domain.rank == 0) {
+        int remainder = params.L_max_global % domain.size;
+        printf("Domain decomposition (balanced):\n");
+        printf("  Total cells: %d, Processes: %d\n", params.L_max_global, domain.size);
+        printf("  Base cells per process: %d\n", params.L_max_global / domain.size);
+        printf("  Processes with extra cell: %d\n", remainder);
+        
+        // Show first few and last few ranks
+        int show_count = std::min(5, domain.size);
+        for (int r = 0; r < show_count; r++) {
+            int r_start, r_end, r_local;
+            GetDecompositionForRank(params.L_max_global, domain.size, r, 
+                                   r_start, r_end, r_local);
+            printf("  Rank %d: cells %d-%d (%d cells)\n", 
+                   r, r_start, r_end, r_local);
+        }
+        if (domain.size > 2 * show_count) {
+            printf("  ...\n");
+        }
+        for (int r = std::max(show_count, domain.size - show_count); r < domain.size; r++) {
+            int r_start, r_end, r_local;
+            GetDecompositionForRank(params.L_max_global, domain.size, r, 
+                                   r_start, r_end, r_local);
+            printf("  Rank %d: cells %d-%d (%d cells)\n", 
+                   r, r_start, r_end, r_local);
+        }
+    }
 
     // Parse command line arguments
     int procs = 1;
@@ -86,8 +115,7 @@ auto main(int argc, char* argv[]) -> int {
         } else if (std::string(argv[i]) == "--check-freq") {
             params.check_frequency = atoi(argv[i + 1]);
             if (domain.rank == 0) {
-                printf("Check frequency: every %d steps\n",
-                       params.check_frequency);
+                printf("Check frequency: every %d steps\n", params.check_frequency);
             }
             i++;
         } else if (std::string(argv[i]) == "--format") {
@@ -201,7 +229,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // Initialize conservative variables
     InitializeConservativeVars(u0, fields, grid, domain.local_L_with_ghosts,
-                                 params.M_max);
+                               params.M_max);
 
     // Initialize ghost cells for boundary ranks before first time step
     if (domain.rank == 0) {
@@ -283,8 +311,7 @@ auto main(int argc, char* argv[]) -> int {
 
     if (domain.rank == 0 && params.animate) {
         AllocateFields(global_fields_anim, params.L_max_global + 1, params.M_max + 1);
-        MemoryAllocation2D(global_grid_anim.r, params.L_max_global + 1,
-                             params.M_max + 1);
+        MemoryAllocation2D(global_grid_anim.r, params.L_max_global + 1, params.M_max + 1);
 
         printf("Animation enabled: will output every %d steps\n",
                params.animation_frequency);
@@ -297,29 +324,28 @@ auto main(int argc, char* argv[]) -> int {
                              global_grid_anim);
 
         if (domain.rank == 0) {
-            std::string filename = GenerateOutputFilename(params.output_format, frame_count,
-                                                        domain.size, omp_get_max_threads(),
-                                                        params.filename_template,
-                                                        params.L_max_global, params.M_max, params.dt);
+            std::string filename = GenerateOutputFilename(
+                params.output_format, frame_count, domain.size, omp_get_max_threads(),
+                params.filename_template, params.L_max_global, params.M_max, params.dt);
 
             if (params.output_format == "vtk") {
-                WriteVtk(filename.c_str(), params.L_max_global, params.M_max,
-                            params.dz, global_grid_anim.r, global_fields_anim.rho,
-                            global_fields_anim.v_z, global_fields_anim.v_r,
-                            global_fields_anim.v_phi, global_fields_anim.e,
-                            global_fields_anim.H_z, global_fields_anim.H_r,
-                            global_fields_anim.H_phi, params.output_dir);
+                WriteVtk(filename.c_str(), params.L_max_global, params.M_max, params.dz,
+                         global_grid_anim.r, global_fields_anim.rho,
+                         global_fields_anim.v_z, global_fields_anim.v_r,
+                         global_fields_anim.v_phi, global_fields_anim.e,
+                         global_fields_anim.H_z, global_fields_anim.H_r,
+                         global_fields_anim.H_phi, params.output_dir);
             } else if (params.output_format == "plt") {
-                WritePlt(filename.c_str(), params.L_max_global, params.M_max,
-                            params.dz, global_grid_anim.r, global_fields_anim.rho,
-                            global_fields_anim.v_z, global_fields_anim.v_r,
-                            global_fields_anim.v_phi, global_fields_anim.e,
-                            global_fields_anim.H_z, global_fields_anim.H_r,
-                            global_fields_anim.H_phi, params.output_dir);
+                WritePlt(filename.c_str(), params.L_max_global, params.M_max, params.dz,
+                         global_grid_anim.r, global_fields_anim.rho,
+                         global_fields_anim.v_z, global_fields_anim.v_r,
+                         global_fields_anim.v_phi, global_fields_anim.e,
+                         global_fields_anim.H_z, global_fields_anim.H_r,
+                         global_fields_anim.H_phi, params.output_dir);
             }
 
-            printf("Frame %d written (initial conditions, t=%.6f): %s\n", frame_count,
-                   t, filename.c_str());
+            printf("Frame %d written (initial conditions, t=%.6f): %s\n", frame_count, t,
+                   filename.c_str());
             frame_count++;
         }
     }
@@ -335,14 +361,14 @@ auto main(int argc, char* argv[]) -> int {
 
         // Update central part
         UpdatePhysicalFields(fields, u, grid, domain.local_L + 2, params.M_max,
-                               params.gamma);
+                             params.gamma);
 
         // Apply boundary conditions
         ApplyBoundaryConditions(fields, u, grid, domain, params, r_0);
 
         // Data update
         UpdatePhysicalFields(fields, u, grid, domain.local_L_with_ghosts, params.M_max,
-                               params.gamma);
+                             params.gamma);
 
         // Copy u to u0
         CopyConservativeVars(u0, u, domain.local_L_with_ghosts, params.M_max);
@@ -422,10 +448,10 @@ auto main(int argc, char* argv[]) -> int {
                                  global_grid_anim);
 
             if (domain.rank == 0) {
-                std::string filename = GenerateOutputFilename(params.output_format, frame_count,
-                                                            domain.size, omp_get_max_threads(),
-                                                            params.filename_template,
-                                                            params.L_max_global, params.M_max, params.dt);
+                std::string filename = GenerateOutputFilename(
+                    params.output_format, frame_count, domain.size, omp_get_max_threads(),
+                    params.filename_template, params.L_max_global, params.M_max,
+                    params.dt);
 
                 if (params.output_format == "vtk") {
                     WriteVtk(filename.c_str(), params.L_max_global, params.M_max,

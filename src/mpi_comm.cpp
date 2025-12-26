@@ -7,7 +7,6 @@ void GatherResultsToRank0(const PhysicalFields& fields, const GridGeometry& grid
     const int M_max = params.M_max;
     const int L_max_global = params.L_max_global;
     const int local_L = domain.local_L;
-    const int L_per_proc = domain.L_per_proc;
 
     // Gather data row by row (excluding ghost cells)
     for (int m = 0; m < M_max + 1; m++) {
@@ -55,11 +54,12 @@ void GatherResultsToRank0(const PhysicalFields& fields, const GridGeometry& grid
         int* recvcounts = new int[domain.size];
         int* displs = new int[domain.size];
 
+        // Use balanced decomposition to compute recvcounts and displs
         for (int i = 0; i < domain.size; i++) {
-            int i_start = i * L_per_proc;
-            int i_end = (i + 1) * L_per_proc - 1;
-            if (i == domain.size - 1) i_end = L_max_global - 1;
-            recvcounts[i] = i_end - i_start + 1;
+            int i_start, i_end, i_local;
+            GetDecompositionForRank(L_max_global, domain.size, i, 
+                                   i_start, i_end, i_local);
+            recvcounts[i] = i_local;
             displs[i] = i_start;
         }
 
@@ -119,8 +119,6 @@ void GatherResultsToRank0(const PhysicalFields& fields, const GridGeometry& grid
         delete[] displs;
     }
 }
-
-
 
 static void ExchangeVariable(double **var, const DomainInfo& domain, int M_max) {
     auto *send_left = new double[M_max + 1];

@@ -1,5 +1,5 @@
 CompileFlags:
   Add:
     - "-stdlib=libc++"
-    - "-I/nix/store/cvjp8w08rnzbpwkgn8nlwg8mbwap9izl-libcxx-21.1.2-dev/include/c++/v1"
+    - "-I/nix/store/c6dylzbz3ybcqa2qpwzy829p6dnp6n9c-libcxx-21.1.2-dev/include/c++/v1"
   CompilationDatabase: build/
