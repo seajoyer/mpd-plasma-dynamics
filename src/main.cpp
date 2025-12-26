@@ -37,8 +37,8 @@ auto main(int argc, char* argv[]) -> int {
     params.convergence_threshold = 1e-5;
     params.check_frequency = 100;
 
-    params.T = 50.0;
-    params.dt = 0.0000125;
+    params.T = 4.0;
+    params.dt = 0.0000115;
 
     params.L_max_global = 800;
     params.L_end = 265;
