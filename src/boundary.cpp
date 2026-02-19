@@ -27,15 +27,15 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     // Global l indices for step transition region (RED ZONE - inlet)
     const int l_step_start = static_cast<int>(z_start / dz);
     const int l_step_end = static_cast<int>(z_end / dz);
-    
+    //printf("l_step_end = %d, L_end = %d \n", l_step_end, L_end);
     // Calculate number of m-cells that span the lateral gap for inlet
     const double dy = params.dy;
     const double R2_val = 0.8;  // Outer radius (constant)
     // m_gap where r(l, m_gap) = r_before at the step region
-    const int m_gap = static_cast<int>((r_before - r_after) / (dy * (R2_val - r_after)));
+ //   const int m_gap = static_cast<int>((r_before - r_after) / (dy * (R2_val - r_after)));
     
     // Inflow parameters for RED zone (inlet at step)
-    const double v_inflow = 0.1;  // Inlet velocity
+   // const double v_inflow = 0.1;  // Inlet velocity
     
     // =========================================================================
     // LEFT BOUNDARY CONDITION (z=0) - WALL / NO-FLOW
@@ -51,27 +51,24 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
             
             // Zero velocity - no flow through wall
             fields.v_z[1][m] = 0.0;
-            fields.v_r[1][m] = 0.0;
-            fields.v_phi[1][m] = 0.0;
+            fields.v_r[1][m] = fields.v_r[2][m];
+            fields.v_phi[1][m] = fields.v_phi[2][m];
             
-            // Magnetic field: perfectly conducting wall
-            // Normal component (H_z) is zero at the wall
-            // Tangential components (H_r, H_phi) are extrapolated
-            fields.H_z[1][m] = 0.0;  // No normal B-field at conducting wall
-            fields.H_r[1][m] = fields.H_r[2][m];
-            fields.H_phi[1][m] = fields.H_phi[2][m];
+            fields.H_z[1][m] = H_z0;  // No normal B-field at conducting wall
+            fields.H_r[1][m] = 0;
+            fields.H_phi[1][m] = r_0 / grid.r[1][m];
         }
 
         // Update conservative variables at left boundary
         #pragma omp parallel for
         for (int m = 0; m < M_max + 1; m++) {
             u.u_1[1][m] = fields.rho[1][m] * grid.r[1][m];
-            u.u_2[1][m] = 0.0;  // rho * v_z * r = 0 (no axial flow)
-            u.u_3[1][m] = 0.0;  // rho * v_r * r = 0 (no radial flow)
-            u.u_4[1][m] = 0.0;  // rho * v_phi * r = 0 (no azimuthal flow)
+            u.u_2[1][m] = fields.rho[1][m] * fields.v_z[1][m] * grid.r[1][m];
+            u.u_3[1][m] = fields.rho[1][m] * fields.v_r[1][m] * grid.r[1][m];
+            u.u_4[1][m] = fields.rho[1][m] * fields.v_phi[1][m] * grid.r[1][m];
             u.u_5[1][m] = fields.rho[1][m] * fields.e[1][m] * grid.r[1][m];
             u.u_6[1][m] = fields.H_phi[1][m];
-            u.u_7[1][m] = 0.0;  // H_z * r = 0
+            u.u_7[1][m] = fields.H_z[1][m] * grid.r[1][m];
             u.u_8[1][m] = fields.H_r[1][m] * grid.r[1][m];
         }
         
@@ -141,7 +138,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
             fields.e[l][0] = fields.e[l][1];
             fields.H_phi[l][0] = fields.H_phi[l][1];
             fields.H_z[l][0] = fields.H_z[l][1];
-            fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
+            fields.H_r[l][0] = fields.H_z[l][0] * grid.r_z[l][0];
 
             u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
             u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
@@ -173,14 +170,14 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
             
             // 2. Velocity: Plasma enters through the surface
             // v_r < 0 means flow is directed radially inward from the step face
-            fields.v_phi[l][m] = 0.0;
-            fields.v_z[l][m]   = v_inflow;  // Axial component downstream
-            fields.v_r[l][m]   = 0;       // Radial inward velocity at the surface
+            fields.v_phi[l][m] = fields.v_phi[l][m + 1];
+            fields.v_z[l][m]   = u.u_2[l][m + 2] / (fields.rho[l][m + 1] * grid.r[l][m + 1]);  // Axial component downstream
+            fields.v_r[l][m]   = fields.v_r[l][m + 1];       // Radial inward velocity at the surface
             
             // 3. Magnetic field at inlet surface
-            fields.H_phi[l][m] = r_0 / grid.r[l][m];
-            fields.H_z[l][m]   = H_z0;
-            fields.H_r[l][m]   = fields.H_z[l][m] * grid.r_z[l][m];
+            fields.H_phi[l][m] = fields.H_phi[l][m + 1];
+            fields.H_z[l][m]   = fields.H_z[l][m + 1];
+            fields.H_r[l][m]   = fields.H_r[l][m + 1];
             
             // 4. Internal energy (based on the specified rho and beta)
             fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);
@@ -200,31 +197,31 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     // REGION BETWEEN STEP AND L_END (l_step_end < l <= L_end, m = 0)
     // Non-leakage (slip wall) condition - inner wall after the step narrows
     // =========================================================================
-    for (int l = 1; l < local_L + 1; l++) {
-        int l_global = domain.l_start + l - 1;
-        
-        // Apply to cells after the step transition but before L_end
-        if (l_global > l_step_end && l_global <= L_end) {
-            // Non-leakage (slip wall) condition from boundary-pure.cpp
-            fields.rho[l][0] = fields.rho[l][1];
-            fields.v_z[l][0] = fields.v_z[l][1];
-            fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
-            fields.v_phi[l][0] = fields.v_phi[l][1];
-            fields.e[l][0] = fields.e[l][1];
-            fields.H_phi[l][0] = fields.H_phi[l][1];
-            fields.H_z[l][0] = fields.H_z[l][1];
-            fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
-
-            u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
-            u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
-            u.u_3[l][0] = fields.rho[l][0] * fields.v_r[l][0] * grid.r[l][0];
-            u.u_4[l][0] = fields.rho[l][0] * fields.v_phi[l][0] * grid.r[l][0];
-            u.u_5[l][0] = fields.rho[l][0] * fields.e[l][0] * grid.r[l][0];
-            u.u_6[l][0] = fields.H_phi[l][0];
-            u.u_7[l][0] = fields.H_z[l][0] * grid.r[l][0];
-            u.u_8[l][0] = fields.H_r[l][0] * grid.r[l][0];
-        }
-    }
+//   for (int l = 1; l < local_L + 1; l++) {
+//       int l_global = domain.l_start + l - 1;
+//       
+//       // Apply to cells after the step transition but before L_end
+//       if (l_global > l_step_end && l_global <= L_end) {
+//           // Non-leakage (slip wall) condition from boundary-pure.cpp
+//           fields.rho[l][0] = fields.rho[l][1];
+//           fields.v_z[l][0] = fields.v_z[l][1];
+//           fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
+//           fields.v_phi[l][0] = fields.v_phi[l][1];
+//           fields.e[l][0] = fields.e[l][1];
+//           fields.H_phi[l][0] = fields.H_phi[l][1];
+//           fields.H_z[l][0] = fields.H_z[l][1];
+//           fields.H_r[l][0] = fields.H_z[l][1] * grid.r_z[l][1];
+//
+//           u.u_1[l][0] = fields.rho[l][0] * grid.r[l][0];
+//           u.u_2[l][0] = fields.rho[l][0] * fields.v_z[l][0] * grid.r[l][0];
+//           u.u_3[l][0] = fields.rho[l][0] * fields.v_r[l][0] * grid.r[l][0];
+//           u.u_4[l][0] = fields.rho[l][0] * fields.v_phi[l][0] * grid.r[l][0];
+//           u.u_5[l][0] = fields.rho[l][0] * fields.e[l][0] * grid.r[l][0];
+//           u.u_6[l][0] = fields.H_phi[l][0];
+//           u.u_7[l][0] = fields.H_z[l][0] * grid.r[l][0];
+//           u.u_8[l][0] = fields.H_r[l][0] * grid.r[l][0];
+//       }
+//   }
 
     // =========================================================================
     // YELLOW ZONE: DOWN BOUNDARY CONDITION - AFTER STEP (l > L_end, m = 0)
@@ -234,7 +231,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
     for (int l = 1; l < local_L + 1; l++) {
         int l_global = domain.l_start + l - 1;
         
-        if (l_global > L_end && l_global < L_max_global) {
+        if (l_global > l_step_end && l_global < L_max_global) {
             int m = 0;
             
             u.u_1[l][m] = (0.25 * (u.u_1[l + 1][m] / grid.r[l + 1][m] + u.u_1[l - 1][m] / grid.r[l - 1][m] + 

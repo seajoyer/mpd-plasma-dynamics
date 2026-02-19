@@ -23,8 +23,7 @@ auto GenerateOutputFilename(const std::string& format, int frame_number, int mpi
                  << "__frame_" << std::setw(6) << std::setfill('0') << frame_number << '.'
                  << ext;
     } else {
-        filename << "res_" << L_max << "x" << M_max << "__dt_" << std::fixed
-                 << std::setprecision(7) << dt << "__frame_" << std::setw(6)
+        filename << "res_" << L_max << "x" << M_max << "__frame_" << std::setw(6)
                  << std::setfill('0') << frame_number << '.' << ext;
     }
 

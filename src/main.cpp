@@ -28,17 +28,23 @@ auto main(int argc, char* argv[]) -> int {
     SimulationParams params;
     params.gamma = 1.67;
     params.beta = 0.05;
-    params.H_z0 = 0.0;
+    params.H_z0 = 0.00;
     params.animate = 0;
     params.animation_frequency = 50000;
     params.output_format = "vtk";
     params.output_dir = "output";
 
-    params.convergence_threshold = 1e-5;
+    params.convergence_threshold = 1e-7;
     params.check_frequency = 100;
 
     params.T = 50.0;
-    params.dt = 0.000005;
+    
+    // Adaptive time stepping parameters
+    params.CFL = 0.5;                    // CFL number
+    params.dt_initial = 0.0000025;       // Initial time step guess
+    params.dt_min = 1e-10;               // Minimum allowed time step
+    params.dt_max = 0.001;               // Maximum allowed time step
+    params.dt = params.dt_initial;       // Start with initial guess
 
     params.L_max_global = 800;
     params.L_end = 265;
@@ -114,10 +120,37 @@ auto main(int argc, char* argv[]) -> int {
                 printf("Maximum value for time: %e\n", params.T);
             }
             i++;
+        } else if (std::string(argv[i]) == "--cfl") {
+            params.CFL = atof(argv[i + 1]);
+            if (domain.rank == 0) {
+                printf("CFL number: %f\n", params.CFL);
+            }
+            i++;
+        } else if (std::string(argv[i]) == "--dt-min") {
+            params.dt_min = atof(argv[i + 1]);
+            if (domain.rank == 0) {
+                printf("Minimum dt: %e\n", params.dt_min);
+            }
+            i++;
+        } else if (std::string(argv[i]) == "--dt-max") {
+            params.dt_max = atof(argv[i + 1]);
+            if (domain.rank == 0) {
+                printf("Maximum dt: %e\n", params.dt_max);
+            }
+            i++;
         }
     }
 
     omp_set_num_threads(procs);
+
+    // Print adaptive time stepping info
+    if (domain.rank == 0) {
+        printf("=== Adaptive Time Stepping Enabled ===\n");
+        printf("CFL number: %f\n", params.CFL);
+        printf("Initial dt: %e\n", params.dt_initial);
+        printf("dt range: [%e, %e]\n", params.dt_min, params.dt_max);
+        printf("======================================\n");
+    }
 
     double begin, end, total;
 
@@ -277,6 +310,11 @@ auto main(int argc, char* argv[]) -> int {
     int frame_count = 0;
     bool converged = false;
 
+    // Statistics for adaptive time stepping
+    double dt_sum = 0.0;
+    double dt_min_used = 1e30;
+    double dt_max_used = 0.0;
+
     // Allocate global arrays for animation output (rank 0 only)
     PhysicalFields global_fields_anim;
     GridGeometry global_grid_anim;
@@ -324,8 +362,22 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
+    // Compute initial adaptive time step
+    params.dt = ComputeAdaptiveTimeStep(fields, grid, domain, params);
+    if (domain.rank == 0) {
+        printf("Initial adaptive dt: %e\n", params.dt);
+    }
+
     // Main time loop
     while (t < params.T && !converged) {
+        // Compute adaptive time step at the beginning of each iteration
+        params.dt = ComputeAdaptiveTimeStep(fields, grid, domain, params);
+        
+        // Update statistics
+        dt_sum += params.dt;
+        dt_min_used = std::min(dt_min_used, params.dt);
+        dt_max_used = std::max(dt_max_used, params.dt);
+
         // Exchange ghost cells
         ExchangeGhostCellsConservative(u0, domain, params.M_max);
         ExchangeGhostCellsPhysical(fields, domain, params.M_max);
@@ -357,7 +409,8 @@ auto main(int argc, char* argv[]) -> int {
                 fields.H_phi, prev_state.H_phi_prev, domain.local_L, params.M_max);
 
             if (domain.rank == 0) {
-                printf("Step %d, t=%.6f, relative change: %.6e\n", step_count, t, change);
+                printf("Step %d, t=%.6f, dt=%.6e, relative change: %.6e\n", 
+                       step_count, t, params.dt, change);
             }
 
             if (change < params.convergence_threshold) {
@@ -382,32 +435,17 @@ auto main(int argc, char* argv[]) -> int {
             }
         }
 
-        // CFL stability check (every 100 steps)
-        if (step_count % 100 == 0) {
-            double max_wave_speed = ComputeMaxWaveSpeed(
-                fields.rho, fields.v_z, fields.v_r, fields.v_phi, fields.H_z, fields.H_r,
-                fields.H_phi, fields.p, domain.local_L, params.M_max, params.gamma);
-            double dx = std::min(params.dz, params.dy);
-            double CFL_number = 0.5;
-            double dt_max = CFL_number * dx / (max_wave_speed + 1e-10);
-
-            if (params.dt > dt_max && domain.rank == 0 && step_count % 1000 == 0) {
-                printf(
-                    "WARNING: dt=%.6e exceeds CFL limit dt_max=%.6e (max_speed=%.3f)\n",
-                    params.dt, dt_max, max_wave_speed);
-            }
-        }
-
         t += params.dt;
         step_count++;
 
-        // Debug output
+        // Debug output with dt info
         if (domain.rank == 0 && step_count % 1000 == 0) {
             int check_l = 20;
             int check_m = 40;
             if (check_l >= domain.l_start && check_l <= domain.l_end) {
                 int local_check_l = check_l - domain.l_start + 1;
-                printf("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", t,
+                printf("t=%.6f dt=%.6e rho=%.6f v_z=%.6f v_phi=%.6f e=%.6f H_phi=%.6f\n", 
+                       t, params.dt,
                        fields.rho[local_check_l][check_m],
                        fields.v_z[local_check_l][check_m],
                        fields.v_phi[local_check_l][check_m],
@@ -443,8 +481,8 @@ auto main(int argc, char* argv[]) -> int {
                              global_fields_anim.H_phi, params.output_dir);
                 }
 
-                printf("Frame %d written at step %d (t=%.6f): %s\n", frame_count,
-                       step_count, t, filename.c_str());
+                printf("Frame %d written at step %d (t=%.6f, dt=%.6e): %s\n", frame_count,
+                       step_count, t, params.dt, filename.c_str());
                 frame_count++;
             }
         }
@@ -454,24 +492,36 @@ auto main(int argc, char* argv[]) -> int {
     if (domain.rank == 0) {
         end = MPI_Wtime();
         total = end - begin;
-        printf("Calculation time : %lf sec\n", total);
-	printf("Mass flux : %f \n", GetMassFlux(
-				fields.rho[params.L_max_global],
-				fields.v_z[params.L_max_global],
-				grid.dr[params.L_max_global],
-				params.M_max
-				));
+        printf("\n=== Simulation Complete ===\n");
+        printf("Calculation time: %lf sec\n", total);
+        printf("Total steps: %d\n", step_count);
+        printf("Final time: %f\n", t);
+        
+        // Print adaptive time stepping statistics
+        printf("\n=== Adaptive Time Stepping Statistics ===\n");
+        printf("Average dt: %e\n", dt_sum / step_count);
+        printf("Min dt used: %e\n", dt_min_used);
+        printf("Max dt used: %e\n", dt_max_used);
+        printf("CFL number: %f\n", params.CFL);
+        printf("==========================================\n\n");
+        
+        printf("Mass flux: %f\n", GetMassFlux(
+                    fields.rho[params.L_max_global],
+                    fields.v_z[params.L_max_global],
+                    grid.dr[params.L_max_global],
+                    params.M_max
+                    ));
 
-	printf("Thrust : %f \n", GetThrust(
-				fields.rho[params.L_max_global],
-				fields.v_z[params.L_max_global],
-				fields.p[params.L_max_global],
-				fields.H_r[params.L_max_global],
-				fields.H_phi[params.L_max_global],
-				fields.H_z[params.L_max_global],
-				grid.dr[params.L_max_global],
-				params.M_max
-				));
+        printf("Thrust: %f\n", GetThrust(
+                    fields.rho[params.L_max_global],
+                    fields.v_z[params.L_max_global],
+                    fields.p[params.L_max_global],
+                    fields.H_r[params.L_max_global],
+                    fields.H_phi[params.L_max_global],
+                    fields.H_z[params.L_max_global],
+                    grid.dr[params.L_max_global],
+                    params.M_max
+                    ));
         if (params.animate) {
             printf("Total animation frames generated: %d\n", frame_count);
         }

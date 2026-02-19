@@ -1,17 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=mpd-plasma-hybrid
 #SBATCH --nodes=1
-<<<<<<< HEAD
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=48
 #SBATCH --time=10:00:00
 #SBATCH --mem=10G
-=======
-#SBATCH --ntasks-per-node=1  # 1 MPI task per node (total: 2 MPI tasks)
-#SBATCH --cpus-per-task=48  # 32 OpenMP threads per MPI task (total: 64 CPUs)
-#SBATCH --time=02:00:00
-#SBATCH --mem=4G
->>>>>>> 1643640 (Struggle to change stream configuration)
 #SBATCH --output=log/mpd-plasma-%j.out
 #SBATCH --error=log/mpd-plasma-%j.err
 
@@ -39,7 +32,7 @@ echo "======================"
 
 # Kirill's job
 
-mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-4 --animate --anim-freq 50000 --check-freq 100
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-6 --animate --anim-freq 50000 --check-freq 100
 
 # Job summary
 echo "Job completed at $(date)"

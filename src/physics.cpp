@@ -105,3 +105,65 @@ auto MaxArray(double **array, int L, int M) -> double {
 
     return maxim;
 }
+
+auto ComputeAdaptiveTimeStep(const PhysicalFields& fields, const GridGeometry& grid,
+                              const DomainInfo& domain, const SimulationParams& params) -> double {
+    
+    const int local_L = domain.local_L;
+    const int M_max = params.M_max;
+    const double gamma = params.gamma;
+    const double dz = params.dz;
+    const double CFL = params.CFL;
+    
+    // Find the minimum dt required across all cells
+    // dt_local = CFL * min(dx, dy) / max_wave_speed_in_cell
+    double dt_min_local = 1e30;  // Start with large value
+    
+    #pragma omp parallel for collapse(2) reduction(min:dt_min_local)
+    for (int l = 1; l < local_L + 1; l++) {
+        for (int m = 0; m < M_max + 1; m++) {
+            // Prevent division by zero
+            double rho_safe = std::max(fields.rho[l][m], 1e-15);
+            double p_safe = std::max(fields.p[l][m], 1e-15);
+            
+            // Sound speed
+            double cs = std::sqrt(gamma * p_safe / rho_safe);
+            
+            // Alfven speed
+            double H2 = fields.H_z[l][m]*fields.H_z[l][m] + 
+                       fields.H_r[l][m]*fields.H_r[l][m] + 
+                       fields.H_phi[l][m]*fields.H_phi[l][m];
+            double ca = std::sqrt(H2 / rho_safe);
+            
+            // Flow speed
+            double v = std::sqrt(fields.v_z[l][m]*fields.v_z[l][m] + 
+                                fields.v_r[l][m]*fields.v_r[l][m]);
+            
+            // Maximum characteristic speed in this cell
+            double max_speed = v + cs + ca;
+            
+            // Get local cell sizes
+            // dz is constant, but dr varies with position
+            double dr_local = grid.dr[l];
+            
+            // Use minimum cell dimension for CFL
+            double dx_min = std::min(dz, dr_local);
+            
+            // Compute local time step limit
+            if (max_speed > 1e-15) {
+                double dt_local = CFL * dx_min / max_speed;
+                dt_min_local = std::min(dt_min_local, dt_local);
+            }
+        }
+    }
+    
+    // Find global minimum dt across all MPI ranks
+    double dt_global;
+    MPI_Allreduce(&dt_min_local, &dt_global, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+    
+    // Apply safety bounds
+    dt_global = std::max(dt_global, params.dt_min);
+    dt_global = std::min(dt_global, params.dt_max);
+    
+    return dt_global;
+}

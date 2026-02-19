@@ -18,6 +18,10 @@ struct SimulationParams {
     
     double T;               // Final time
     double dt;              // Time step
+    double dt_initial;      // Initial time step guess
+    double dt_min;          // Minimum allowed time step
+    double dt_max;          // Maximum allowed time step
+    double CFL;             // CFL number (typically 0.5 for stability)
     
     int L_max_global;       // Global grid size in z-direction
     int L_end;              // Boundary condition transition point
