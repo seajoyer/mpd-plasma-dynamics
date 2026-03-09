@@ -151,8 +151,8 @@ auto ComputeAdaptiveTimeStep(const PhysicalFields& fields, const GridGeometry& g
             
             // Compute local time step limit
             if (max_speed > 1e-15) {
-                double dt_local = CFL * dx_min / max_speed;
-                dt_min_local = std::min(dt_min_local, dt_local);
+                double dt_local = CFL / (max_speed * std::sqrt(1.0/(dz*dz) + 1.0/(dr_local*dr_local)));
+		dt_min_local = std::min(dt_min_local, dt_local);
             }
         }
     }

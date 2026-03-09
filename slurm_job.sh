@@ -2,8 +2,8 @@
 #SBATCH --job-name=mpd-plasma-hybrid
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=48
-#SBATCH --time=10:00:00
+#SBATCH --cpus-per-task=32
+#SBATCH --time=12:00:00
 #SBATCH --mem=10G
 #SBATCH --output=log/mpd-plasma-%j.out
 #SBATCH --error=log/mpd-plasma-%j.err
@@ -32,7 +32,7 @@ echo "======================"
 
 # Kirill's job
 
-mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-6 --animate --anim-freq 50000 --check-freq 100
+mpirun -np "${SLURM_NTASKS}" --bind-to none ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}" --converge 1e-5 --animate --anim-freq 50000 --check-freq 100
 
 # Job summary
 echo "Job completed at $(date)"

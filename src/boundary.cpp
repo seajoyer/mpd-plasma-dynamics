@@ -35,7 +35,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
  //   const int m_gap = static_cast<int>((r_before - r_after) / (dy * (R2_val - r_after)));
     
     // Inflow parameters for RED zone (inlet at step)
-   // const double v_inflow = 0.1;  // Inlet velocity
+    const double v_inflow = 0.1;  // Inlet velocity
     
     // =========================================================================
     // LEFT BOUNDARY CONDITION (z=0) - WALL / NO-FLOW
@@ -77,22 +77,22 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         for (int m = 0; m < M_max + 1; m++) {
             fields.rho[0][m] = fields.rho[1][m];
             fields.v_z[0][m] = -fields.v_z[2][m];  // Reflect v_z (normal component)
-            fields.v_r[0][m] = fields.v_r[2][m];   // Extrapolate v_r (tangential)
-            fields.v_phi[0][m] = fields.v_phi[2][m]; // Extrapolate v_phi (tangential)
+            fields.v_r[0][m] = fields.v_r[1][m];   // Extrapolate v_r (tangential)
+            fields.v_phi[0][m] = fields.v_phi[1][m]; // Extrapolate v_phi (tangential)
             fields.H_phi[0][m] = fields.H_phi[1][m];
             fields.H_z[0][m] = -fields.H_z[2][m];  // Reflect H_z (normal component)
             fields.H_r[0][m] = fields.H_r[1][m];
             fields.e[0][m] = fields.e[1][m];
             
-            u.u_1[0][m] = u.u_1[1][m];
-            u.u_2[0][m] = -u.u_2[2][m];  // Reflect
-            u.u_3[0][m] = u.u_3[2][m];
-            u.u_4[0][m] = u.u_4[2][m];
-            u.u_5[0][m] = u.u_5[1][m];
-            u.u_6[0][m] = u.u_6[1][m];
-            u.u_7[0][m] = -u.u_7[2][m];  // Reflect
-            u.u_8[0][m] = u.u_8[1][m];
-        }
+            u.u_1[0][m] = fields.rho[0][m] * grid.r[0][m];
+	    u.u_2[0][m] = fields.rho[0][m] * fields.v_z[0][m] * grid.r[0][m];
+       	    u.u_3[0][m] = fields.rho[0][m] * fields.v_r[0][m] * grid.r[0][m];
+	    u.u_4[0][m] = fields.rho[0][m] * fields.v_phi[0][m] * grid.r[0][m];
+	    u.u_5[0][m] = fields.rho[0][m] * fields.e[0][m] * grid.r[0][m];
+	    u.u_6[0][m] = fields.H_phi[0][m];
+	    u.u_7[0][m] = fields.H_z[0][m] * grid.r[0][m];
+	    u.u_8[0][m] = fields.H_r[0][m] * grid.r[0][m];
+    	}
     }
 
     // =========================================================================
@@ -106,7 +106,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         fields.v_r[l][M_max] = fields.v_z[l][M_max] * grid.r_z[l][M_max];
         fields.v_phi[l][M_max] = fields.v_phi[l][M_max - 1];
         fields.e[l][M_max] = fields.e[l][M_max - 1];
-        fields.H_phi[l][M_max] = fields.H_phi[l][M_max - 1];
+        fields.H_phi[l][M_max] = fields.H_phi[l][M_max - 1];  
         fields.H_z[l][M_max] = fields.H_z[l][M_max - 1];
         fields.H_r[l][M_max] = fields.H_z[l][M_max] * grid.r_z[l][M_max];
 
@@ -136,7 +136,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
             fields.v_r[l][0] = fields.v_z[l][1] * grid.r_z[l][1];
             fields.v_phi[l][0] = fields.v_phi[l][1];
             fields.e[l][0] = fields.e[l][1];
-            fields.H_phi[l][0] = fields.H_phi[l][1];
+	    fields.H_phi[l][0] = fields.H_phi[l][1];
             fields.H_z[l][0] = fields.H_z[l][1];
             fields.H_r[l][0] = fields.H_z[l][0] * grid.r_z[l][0];
 
@@ -170,14 +170,14 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
             
             // 2. Velocity: Plasma enters through the surface
             // v_r < 0 means flow is directed radially inward from the step face
-            fields.v_phi[l][m] = fields.v_phi[l][m + 1];
-            fields.v_z[l][m]   = u.u_2[l][m + 2] / (fields.rho[l][m + 1] * grid.r[l][m + 1]);  // Axial component downstream
+            fields.v_phi[l][m] = 0.0;
+            fields.v_z[l][m]   = fields.v_z[l][m + 1];  // Axial component downstream
             fields.v_r[l][m]   = fields.v_r[l][m + 1];       // Radial inward velocity at the surface
             
             // 3. Magnetic field at inlet surface
-            fields.H_phi[l][m] = fields.H_phi[l][m + 1];
-            fields.H_z[l][m]   = fields.H_z[l][m + 1];
-            fields.H_r[l][m]   = fields.H_r[l][m + 1];
+            fields.H_phi[l][m] = fields.H_phi[l][m + 1];  // вместо экстраполяции из m+1
+            fields.H_z[l][m]   = H_z0;
+            fields.H_r[l][m]   = fields.H_z[l][m] * grid.r_z[l][m];
             
             // 4. Internal energy (based on the specified rho and beta)
             fields.e[l][m] = beta / (2.0 * (gamma - 1.0)) * pow(fields.rho[l][m], gamma - 1.0);

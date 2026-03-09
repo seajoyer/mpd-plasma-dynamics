@@ -28,19 +28,19 @@ auto main(int argc, char* argv[]) -> int {
     SimulationParams params;
     params.gamma = 1.67;
     params.beta = 0.05;
-    params.H_z0 = 0.00;
+    params.H_z0 = 0.25;
     params.animate = 0;
     params.animation_frequency = 50000;
     params.output_format = "vtk";
     params.output_dir = "output";
 
-    params.convergence_threshold = 1e-7;
+    params.convergence_threshold = 1e-8;
     params.check_frequency = 100;
 
-    params.T = 50.0;
+    params.T = 10.0;
     
     // Adaptive time stepping parameters
-    params.CFL = 0.5;                    // CFL number
+    params.CFL = 0.65;                    // CFL number
     params.dt_initial = 0.0000025;       // Initial time step guess
     params.dt_min = 1e-10;               // Minimum allowed time step
     params.dt_max = 0.001;               // Maximum allowed time step
