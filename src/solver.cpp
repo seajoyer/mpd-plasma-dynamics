@@ -1,0 +1,358 @@
+#include "solver.hpp"
+
+#include <cmath>
+#include <algorithm>
+
+// ============================================================
+// Constructor
+// ============================================================
+
+Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
+               const Grid& grid, Fields& f)
+    : cfg_(cfg), mpi_(mpi), grid_(grid), f_(f),
+      sl_(cfg.M_max + 1), sr_(cfg.M_max + 1),
+      rl_(cfg.M_max + 1), rr_(cfg.M_max + 1)
+{}
+
+// ============================================================
+// Public entry point
+// ============================================================
+
+void Solver::advance() {
+    exchange_all_ghosts();
+    compute_central_update();
+    update_central_physical();
+    apply_bc_left();
+    apply_bc_upper();
+    apply_bc_lower_inner();
+    apply_bc_lower_outer();
+    apply_bc_right();
+    // Full reconstruction from u (including all boundary cells)
+    f_.update_physical_from_u(grid_, cfg_, 1, mpi_.local_L, 0, cfg_.M_max);
+    f_.copy_u_to_u0();
+}
+
+// ============================================================
+// Ghost-cell exchange
+// ============================================================
+
+void Solver::exchange_all_ghosts() {
+    const int ncols = cfg_.M_max + 1;
+
+    // Conservative arrays
+    double** u0_ptrs[8] = {
+        f_.u0_1.raw(), f_.u0_2.raw(), f_.u0_3.raw(), f_.u0_4.raw(),
+        f_.u0_5.raw(), f_.u0_6.raw(), f_.u0_7.raw(), f_.u0_8.raw()
+    };
+    for (auto* arr : u0_ptrs)
+        mpi_.exchange_ghosts(arr, ncols,
+                             sl_.data(), sr_.data(),
+                             rl_.data(), rr_.data());
+
+    // Physical arrays
+    double** phys_ptrs[10] = {
+        f_.rho.raw(),   f_.v_z.raw(),   f_.v_r.raw(),
+        f_.v_phi.raw(), f_.e.raw(),     f_.p.raw(),
+        f_.P.raw(),     f_.H_z.raw(),   f_.H_r.raw(),
+        f_.H_phi.raw()
+    };
+    for (auto* arr : phys_ptrs)
+        mpi_.exchange_ghosts(arr, ncols,
+                             sl_.data(), sr_.data(),
+                             rl_.data(), rr_.data());
+}
+
+// ============================================================
+// Lax–Friedrichs central update
+// ============================================================
+
+void Solver::compute_central_update() {
+    const int local_L = mpi_.local_L;
+    const int M_max   = cfg_.M_max;
+    const double dt   = cfg_.dt;
+    const double dz   = cfg_.dz;
+
+    // Convenience aliases (raw double**) for performance-critical inner loop
+    auto** u0_1 = f_.u0_1.raw();  auto** u0_2 = f_.u0_2.raw();
+    auto** u0_3 = f_.u0_3.raw();  auto** u0_4 = f_.u0_4.raw();
+    auto** u0_5 = f_.u0_5.raw();  auto** u0_6 = f_.u0_6.raw();
+    auto** u0_7 = f_.u0_7.raw();  auto** u0_8 = f_.u0_8.raw();
+
+    auto** u_1  = f_.u_1.raw();   auto** u_2  = f_.u_2.raw();
+    auto** u_3  = f_.u_3.raw();   auto** u_4  = f_.u_4.raw();
+    auto** u_5  = f_.u_5.raw();   auto** u_6  = f_.u_6.raw();
+    auto** u_7  = f_.u_7.raw();   auto** u_8  = f_.u_8.raw();
+
+    auto** rho   = f_.rho.raw();   auto** v_z  = f_.v_z.raw();
+    auto** v_r   = f_.v_r.raw();   auto** v_phi= f_.v_phi.raw();
+    auto** p     = f_.p.raw();     auto** P    = f_.P.raw();
+    auto** H_z   = f_.H_z.raw();   auto** H_r  = f_.H_r.raw();
+    auto** H_phi = f_.H_phi.raw();
+    auto** r     = grid_.r.raw();
+    const double* dr = grid_.dr.data();
+
+    #pragma omp parallel for collapse(2)
+    for (int l = 1; l < local_L + 1; ++l) {
+        for (int m = 1; m < M_max; ++m) {
+            const double dr_l = dr[l];
+
+            // u1: mass conservation (rho * r)
+            u_1[l][m] =
+                0.25 * (u0_1[l+1][m] + u0_1[l-1][m] + u0_1[l][m+1] + u0_1[l][m-1])
+                + dt * (-(u0_1[l+1][m]*v_z[l+1][m] - u0_1[l-1][m]*v_z[l-1][m]) / (2*dz)
+                        -(u0_1[l][m+1]*v_r[l][m+1]  - u0_1[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u2: z-momentum
+            u_2[l][m] =
+                0.25 * (u0_2[l+1][m] + u0_2[l-1][m] + u0_2[l][m+1] + u0_2[l][m-1])
+                + dt * (( (H_z[l+1][m]*H_z[l+1][m] - P[l+1][m])*r[l+1][m]
+                         -(H_z[l-1][m]*H_z[l-1][m] - P[l-1][m])*r[l-1][m]) / (2*dz)
+                        +( H_z[l][m+1]*H_r[l][m+1]*r[l][m+1]
+                          -H_z[l][m-1]*H_r[l][m-1]*r[l][m-1]) / (2*dr_l)
+                        -(u0_2[l+1][m]*v_z[l+1][m] - u0_2[l-1][m]*v_z[l-1][m]) / (2*dz)
+                        -(u0_2[l][m+1]*v_r[l][m+1]  - u0_2[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u3: r-momentum
+            u_3[l][m] =
+                0.25 * (u0_3[l+1][m] + u0_3[l-1][m] + u0_3[l][m+1] + u0_3[l][m-1])
+                + dt * ((rho[l][m]*v_phi[l][m]*v_phi[l][m] + P[l][m] - H_phi[l][m]*H_phi[l][m])
+                        +( H_z[l+1][m]*H_r[l+1][m]*r[l+1][m]
+                          -H_z[l-1][m]*H_r[l-1][m]*r[l-1][m]) / (2*dz)
+                        +( (H_r[l][m+1]*H_r[l][m+1] - P[l][m+1])*r[l][m+1]
+                          -(H_r[l][m-1]*H_r[l][m-1] - P[l][m-1])*r[l][m-1]) / (2*dr_l)
+                        -(u0_3[l+1][m]*v_z[l+1][m] - u0_3[l-1][m]*v_z[l-1][m]) / (2*dz)
+                        -(u0_3[l][m+1]*v_r[l][m+1]  - u0_3[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u4: phi-momentum
+            u_4[l][m] =
+                0.25 * (u0_4[l+1][m] + u0_4[l-1][m] + u0_4[l][m+1] + u0_4[l][m-1])
+                + dt * ((-rho[l][m]*v_r[l][m]*v_phi[l][m] + H_phi[l][m]*H_r[l][m])
+                        +( H_phi[l+1][m]*H_z[l+1][m]*r[l+1][m]
+                          -H_phi[l-1][m]*H_z[l-1][m]*r[l-1][m]) / (2*dz)
+                        +( H_phi[l][m+1]*H_r[l][m+1]*r[l][m+1]
+                          -H_phi[l][m-1]*H_r[l][m-1]*r[l][m-1]) / (2*dr_l)
+                        -(u0_4[l+1][m]*v_z[l+1][m] - u0_4[l-1][m]*v_z[l-1][m]) / (2*dz)
+                        -(u0_4[l][m+1]*v_r[l][m+1]  - u0_4[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u5: internal energy
+            u_5[l][m] =
+                0.25 * (u0_5[l+1][m] + u0_5[l-1][m] + u0_5[l][m+1] + u0_5[l][m-1])
+                + dt * (-p[l][m] * ((v_z[l+1][m]*r[l+1][m] - v_z[l-1][m]*r[l-1][m]) / (2*dz)
+                                   +(v_r[l][m+1]*r[l][m+1]  - v_r[l][m-1]*r[l][m-1])  / (2*dr_l))
+                        -(u0_5[l+1][m]*v_z[l+1][m] - u0_5[l-1][m]*v_z[l-1][m]) / (2*dz)
+                        -(u0_5[l][m+1]*v_r[l][m+1]  - u0_5[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u6: H_phi (toroidal field)
+            u_6[l][m] =
+                0.25 * (u0_6[l+1][m] + u0_6[l-1][m] + u0_6[l][m+1] + u0_6[l][m-1])
+                + dt * ((H_z[l+1][m]*v_phi[l+1][m] - H_z[l-1][m]*v_phi[l-1][m]) / (2*dz)
+                       +(H_r[l][m+1]*v_phi[l][m+1]  - H_r[l][m-1]*v_phi[l][m-1])  / (2*dr_l)
+                        -(u0_6[l+1][m]*v_z[l+1][m] - u0_6[l-1][m]*v_z[l-1][m]) / (2*dz)
+                        -(u0_6[l][m+1]*v_r[l][m+1]  - u0_6[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u7: H_z * r (axial flux)
+            u_7[l][m] =
+                0.25 * (u0_7[l+1][m] + u0_7[l-1][m] + u0_7[l][m+1] + u0_7[l][m-1])
+                + dt * ((H_r[l][m+1]*v_z[l][m+1]*r[l][m+1] - H_r[l][m-1]*v_z[l][m-1]*r[l][m-1]) / (2*dr_l)
+                        -(u0_7[l][m+1]*v_r[l][m+1]  - u0_7[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+
+            // u8: H_r * r (radial flux)
+            u_8[l][m] =
+                0.25 * (u0_8[l+1][m] + u0_8[l-1][m] + u0_8[l][m+1] + u0_8[l][m-1])
+                + dt * ((H_z[l+1][m]*v_r[l+1][m]*r[l+1][m] - H_z[l-1][m]*v_r[l-1][m]*r[l-1][m]) / (2*dz)
+                        -(u0_8[l+1][m]*v_z[l+1][m] - u0_8[l-1][m]*v_z[l-1][m]) / (2*dz));
+        }
+    }
+}
+
+void Solver::update_central_physical() {
+    f_.update_physical_from_u(grid_, cfg_, 1, mpi_.local_L, 1, cfg_.M_max - 1);
+}
+
+// ============================================================
+// Inline helper: rebuild conservative u from physical at (l,m)
+// ============================================================
+
+inline void Solver::rebuild_u_from_physical(int l, int m) {
+    f_.u_1[l][m] = f_.rho  [l][m] * grid_.r[l][m];
+    f_.u_2[l][m] = f_.rho  [l][m] * f_.v_z  [l][m] * grid_.r[l][m];
+    f_.u_3[l][m] = f_.rho  [l][m] * f_.v_r  [l][m] * grid_.r[l][m];
+    f_.u_4[l][m] = f_.rho  [l][m] * f_.v_phi[l][m] * grid_.r[l][m];
+    f_.u_5[l][m] = f_.rho  [l][m] * f_.e    [l][m] * grid_.r[l][m];
+    f_.u_6[l][m] = f_.H_phi[l][m];
+    f_.u_7[l][m] = f_.H_z  [l][m] * grid_.r[l][m];
+    f_.u_8[l][m] = f_.H_r  [l][m] * grid_.r[l][m];
+}
+
+// ============================================================
+// Boundary conditions
+// ============================================================
+
+void Solver::apply_bc_left() {
+    if (mpi_.rank != 0) return;
+
+    const double gamma = cfg_.gamma;
+    const double beta  = cfg_.beta;
+    const double H_z0  = cfg_.H_z0;
+    const double r_0   = grid_.r_0;
+    const int    M_max = cfg_.M_max;
+
+    #pragma omp parallel for
+    for (int m = 0; m < M_max + 1; ++m) {
+        constexpr int l = 1;
+        f_.rho  [l][m] = 1.0;
+        f_.v_phi[l][m] = 0.0;
+        // v_z derived from mass flux of updated neighbour
+        f_.v_z  [l][m] = f_.u_2[2][m] / (f_.rho[l][m] * grid_.r[l][m]);
+        f_.v_r  [l][m] = 0.0;
+        f_.H_phi[l][m] = r_0 / grid_.r[l][m];
+        f_.H_z  [l][m] = H_z0;
+        f_.H_r  [l][m] = 0.0;
+        f_.e    [l][m] = beta / (2.0 * (gamma - 1.0))
+                         * std::pow(f_.rho[l][m], gamma - 1.0);
+
+        rebuild_u_from_physical(l, m);
+    }
+}
+
+void Solver::apply_bc_right() {
+    if (mpi_.rank != mpi_.size - 1) return;
+
+    const int local_L = mpi_.local_L;
+    const int M_max   = cfg_.M_max;
+
+    #pragma omp parallel for
+    for (int m = 0; m < M_max + 1; ++m) {
+        f_.u_1[local_L][m] = f_.u_1[local_L - 1][m];
+        f_.u_2[local_L][m] = f_.u_2[local_L - 1][m];
+        f_.u_3[local_L][m] = f_.u_3[local_L - 1][m];
+        f_.u_4[local_L][m] = f_.u_4[local_L - 1][m];
+        f_.u_5[local_L][m] = f_.u_5[local_L - 1][m];
+        f_.u_6[local_L][m] = f_.u_6[local_L - 1][m];
+        f_.u_7[local_L][m] = f_.u_7[local_L - 1][m];
+        f_.u_8[local_L][m] = f_.u_8[local_L - 1][m];
+    }
+}
+
+void Solver::apply_bc_upper() {
+    const int local_L = mpi_.local_L;
+    const int M_max   = cfg_.M_max;
+
+    #pragma omp parallel for
+    for (int l = 1; l < local_L + 1; ++l) {
+        const int m = M_max;
+        f_.rho  [l][m] = f_.rho  [l][m-1];
+        f_.v_z  [l][m] = f_.v_z  [l][m-1];
+        f_.v_r  [l][m] = f_.v_z  [l][m] * grid_.r_z[l][m];
+        f_.v_phi[l][m] = f_.v_phi[l][m-1];
+        f_.e    [l][m] = f_.e    [l][m-1];
+        f_.H_phi[l][m] = f_.H_phi[l][m-1];
+        f_.H_z  [l][m] = f_.H_z  [l][m-1];
+        f_.H_r  [l][m] = f_.H_z  [l][m] * grid_.r_z[l][m];
+
+        rebuild_u_from_physical(l, m);
+    }
+}
+
+void Solver::apply_bc_lower_inner() {
+    const int L_end   = cfg_.L_end;
+    const int l_start = mpi_.l_start;
+    const int l_end_g = mpi_.l_end;
+
+    if (l_start > L_end || l_end_g < 1) return;
+
+    const int L_end_in_domain  = std::min(L_end, l_end_g);
+    const int local_L_end_rel  = L_end_in_domain - l_start + 1;
+
+    for (int l = 1; l <= local_L_end_rel; ++l) {
+        const int l_global = l_start + l - 1;
+        if (l_global < 1 || l_global > L_end) continue;
+
+        const int m = 0;
+        f_.rho  [l][m] = f_.rho  [l][1];
+        f_.v_z  [l][m] = f_.v_z  [l][1];
+        f_.v_r  [l][m] = f_.v_z  [l][1] * grid_.r_z[l][1];
+        f_.v_phi[l][m] = f_.v_phi[l][1];
+        f_.e    [l][m] = f_.e    [l][1];
+        f_.H_phi[l][m] = f_.H_phi[l][1];
+        f_.H_z  [l][m] = f_.H_z  [l][1];
+        f_.H_r  [l][m] = f_.H_z  [l][1] * grid_.r_z[l][1];
+
+        rebuild_u_from_physical(l, m);
+    }
+}
+
+void Solver::apply_bc_lower_outer() {
+    const int local_L = mpi_.local_L;
+    const int L_end   = cfg_.L_end;
+    const int L_max   = cfg_.L_max_global;
+    const int l_start = mpi_.l_start;
+
+    const double dt  = cfg_.dt;
+    const double dz  = cfg_.dz;
+
+    auto** u0_1 = f_.u0_1.raw(); auto** u0_2 = f_.u0_2.raw();
+    auto** u0_5 = f_.u0_5.raw(); auto** u0_7 = f_.u0_7.raw();
+    auto** v_z  = f_.v_z.raw();
+    auto** v_r  = f_.v_r.raw();  auto** p    = f_.p.raw();
+    auto** P    = f_.P.raw();    auto** H_z  = f_.H_z.raw();
+    auto** H_r  = f_.H_r.raw();
+    auto** r    = grid_.r.raw();
+    const double* dr = grid_.dr.data();
+
+    #pragma omp parallel for
+    for (int l = 1; l < local_L + 1; ++l) {
+        const int l_global = l_start + l - 1;
+        if (l_global <= L_end || l_global >= L_max) continue;
+
+        constexpr int m = 0;
+        const double dr_l = dr[l];
+
+        f_.u_1[l][m] =
+            (0.25 * (u0_1[l+1][m]/r[l+1][m] + u0_1[l-1][m]/r[l-1][m]
+                   + u0_1[l][m+1]/r[l][m+1]  + u0_1[l][m]/r[l][m])
+             + dt * (-(u0_1[l+1][m]/r[l+1][m]*v_z[l+1][m]
+                      -u0_1[l-1][m]/r[l-1][m]*v_z[l-1][m]) / (2*dz)
+                     -(u0_1[l][m+1]/r[l][m+1]*v_r[l][m+1]
+                      -u0_1[l][m]/r[l][m]*v_r[l][1])         / dr_l))
+            * r[l][m];
+
+        f_.u_2[l][m] =
+            (0.25 * (u0_2[l+1][m]/r[l+1][m] + u0_2[l-1][m]/r[l-1][m]
+                   + u0_2[l][m+1]/r[l][m+1]  + u0_2[l][m]/r[l][m])
+             + dt * (( (H_z[l+1][m]*H_z[l+1][m] - P[l+1][m])
+                      -(H_z[l-1][m]*H_z[l-1][m] - P[l-1][m])) / (2*dz)
+                    +( H_z[l][m+1]*H_r[l][m+1] - H_z[l][m]*H_r[l][m]) / dr_l
+                     -(u0_2[l+1][m]/r[l+1][m]*v_z[l+1][m]
+                      -u0_2[l-1][m]/r[l-1][m]*v_z[l-1][m]) / (2*dz)
+                     -(u0_2[l][m+1]/r[l][m+1]*v_r[l][m+1]
+                      -u0_2[l][m]/r[l][m]*v_r[l][m])           / dr_l))
+            * r[l][m];
+
+        f_.u_3[l][m] = 0.0;
+        f_.u_4[l][m] = 0.0;
+
+        f_.u_5[l][m] =
+            (0.25 * (u0_5[l+1][m]/r[l+1][m] + u0_5[l-1][m]/r[l-1][m]
+                   + u0_5[l][m+1]/r[l][m+1]  + u0_5[l][m]/r[l][m])
+             + dt * (-p[l][m] * ((v_z[l+1][m] - v_z[l-1][m]) / (2*dz)
+                                +(v_r[l][m+1]  - v_r[l][m])    / dr_l)
+                     -(u0_5[l+1][m]/r[l+1][m]*v_z[l+1][m]
+                      -u0_5[l-1][m]/r[l-1][m]*v_z[l-1][m]) / (2*dz)
+                     -(u0_5[l][m+1]/r[l][m+1]*v_r[l][m+1]
+                      -u0_5[l][m]/r[l][m]*v_r[l][m])           / dr_l))
+            * r[l][m];
+
+        f_.u_6[l][m] = 0.0;
+
+        f_.u_7[l][m] =
+            (0.25 * (u0_7[l+1][m]/r[l+1][m] + u0_7[l-1][m]/r[l-1][m]
+                   + u0_7[l][m+1]/r[l][m+1]  + u0_7[l][m]/r[l][m])
+             + dt * ((H_r[l][m+1]*v_z[l][m+1] - H_r[l][m]*v_z[l][m]) / dr_l
+                     -(u0_7[l][m+1]/r[l][m+1]*v_r[l][m+1]
+                      -u0_7[l][m]/r[l][m]*v_r[l][m])                   / dr_l))
+            * r[l][m];
+
+        f_.u_8[l][m] = 0.0;
+    }
+}

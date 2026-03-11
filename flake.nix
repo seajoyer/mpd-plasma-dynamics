@@ -19,6 +19,8 @@
             gcc
             
             openmpi
+            llvmPackages_latest.openmp
+            llvmPackages_latest.libcxx
             
             clang-tools
             gdb
