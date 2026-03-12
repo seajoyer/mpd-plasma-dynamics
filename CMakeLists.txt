@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(FETCHCONTENT_QUIET ON)
+set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE ALWAYS)
+
+include(FetchContent)
+
+include(cmake/Dependencies.cmake)
+
 # --------------------------------------------------------------------------
 # Dependencies
 # --------------------------------------------------------------------------
