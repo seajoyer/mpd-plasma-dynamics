@@ -1,17 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name=mpd-plasma-hybrid
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=1  # 1 MPI task per node (total: 2 MPI tasks)
-#SBATCH --cpus-per-task=32   # 32 OpenMP threads per MPI task (total: 64 CPUs)
-#SBATCH --time=00:30:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=2
+#SBATCH --time=01:30:00
 #SBATCH --mem=4G
-#SBATCH --output=log/mpd-plasma-%j.out
-#SBATCH --error=log/mpd-plasma-%j.err
+#SBATCH --output=output/log/mpd-plasma-%j.out
+#SBATCH --error=output/log/mpd-plasma-%j.err
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export OMP_PLACES=cores
-export OMP_PROC_BIND=close           # FIXED: was 'false', now 'close' for better performance
-export OMP_WAIT_POLICY=active        # Reduce latency in critical sections
+export OMP_WAIT_POLICY=passive
+# export OMP_PROC_BIND=close
 
 echo "=== SLURM Debug Info ==="
 echo "SLURM_NTASKS: ${SLURM_NTASKS}"
@@ -24,7 +24,7 @@ echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
 echo "Date: $(date)"
 echo "======================"
 
-mpirun -np ${SLURM_NTASKS} --bind-to none ./build/mpd-plasma-dynamics ${OMP_NUM_THREADS}
+mpirun -np "${SLURM_NTASKS}" --bind-to core ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}"
 
 # Job summary
 echo "Job completed at $(date)"

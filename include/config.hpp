@@ -5,17 +5,17 @@
 /// Command-line arguments are parsed by parse_args().
 struct SimConfig {
     // ---- physics ----
-    double gamma  = 1.67;
-    double beta   = 0.05;
-    double H_z0   = 0.25;
-    int    animate = 0;
+    double gamma = 1.67;
+    double beta  = 0.05;
+    double H_z0  = 0.25;
 
     // ---- convergence ----
     double convergence_threshold = 0.0;   ///< 0 → disabled
     int    check_frequency       = 100;
+    int    animate = 0;
 
     // ---- time integration ----
-    double T  = 0.1;
+    double T  = 0.5;
     double dt = 0.000025;
 
     // ---- global grid ----
