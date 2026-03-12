@@ -15,17 +15,34 @@ int main(int argc, char* argv[]) {
     // ----------------------------------------------------------------
     // 1. Configuration
     // ----------------------------------------------------------------
-    SimConfig cfg;
-    cfg.init();
 
-    // MPIManager must be constructed before cfg.parse_args so rank is known.
+    // Determine config file path: first positional argument or default.
+    const char* config_path = (argc > 1) ? argv[1] : "config.yaml";
+
+    SimConfig cfg;
+    cfg.load(config_path);
+
+    // MPIManager must be constructed before any printing so rank is known.
     MPIManager mpi(argc, argv, cfg);
 
-    cfg.parse_args(argc, argv, mpi.rank);
+    if (mpi.rank == 0) {
+        std::printf("Config file         : %s\n", config_path);
+        std::printf("Grid                : %d x %d  (L x M)\n",
+                    cfg.L_max_global, cfg.M_max);
+        std::printf("Time step / end     : %.6e / %.4f\n", cfg.dt, cfg.T);
+        std::printf("MPI ranks           : %d\n", mpi.size);
 
-    // Legacy: argv[1] carries the OpenMP thread count
-    const int omp_threads = (argc > 1) ? std::atoi(argv[1]) : 1;
-    omp_set_num_threads(omp_threads);
+        if (cfg.convergence_threshold > 0.0)
+            std::printf("Convergence check   : threshold = %.2e, every %d steps\n",
+                        cfg.convergence_threshold, cfg.check_frequency);
+
+        if (cfg.vtk_step > 0)
+            std::printf("VTK output every    : %d steps\n", cfg.vtk_step);
+    }
+
+    // Apply OpenMP thread count (0 → keep whatever OMP_NUM_THREADS set).
+    if (cfg.openmp_threads > 0)
+        omp_set_num_threads(cfg.openmp_threads);
 
     // ----------------------------------------------------------------
     // 2. Build grid and initialise fields
@@ -53,11 +70,31 @@ int main(int argc, char* argv[]) {
     int    step_count = 0;
     bool   converged  = false;
 
+    // Print periodic-checkpoint table header before the first row.
+    constexpr int check_l_global = 20;
+    constexpr int check_m        = 40;
+
+    if (mpi.rank == 0
+            && check_l_global >= mpi.l_start
+            && check_l_global <= mpi.l_end) {
+        std::printf("\n%-14s %-14s %-14s %-14s %-14s %-14s\n",
+                    "t", "rho", "v_z", "v_phi", "e", "H_phi");
+        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s\n",
+                    "--------------", "--------------", "--------------",
+                    "--------------", "--------------", "--------------");
+    }
+
+    // Write step 0 before the loop starts.
+    if (cfg.vtk_step > 0)
+        io.write_frame(0, fields, grid);
+
     const double begin = mpi.wtime();
 
     while (t < cfg.T && !converged) {
 
         solver.advance();
+        t += cfg.dt;
+        ++step_count;
 
         // ---- convergence check ----
         if (cfg.convergence_threshold > 0.0
@@ -67,14 +104,14 @@ int main(int argc, char* argv[]) {
                 fields, mpi.local_L, cfg.M_max);
 
             if (mpi.rank == 0)
-                printf("Step %d, t=%.6f, relative change: %.6e\n",
-                       step_count, t, change);
+                std::printf("Step %d, t=%.6f, relative change: %.6e\n",
+                            step_count, t, change);
 
             if (change < cfg.convergence_threshold) {
                 converged = true;
                 if (mpi.rank == 0)
-                    printf("Converged at t=%.6f after %d steps\n",
-                           t, step_count);
+                    std::printf("Converged at t=%.6f after %d steps\n",
+                                t, step_count);
             }
             fields.save_prev();
         }
@@ -84,39 +121,36 @@ int main(int argc, char* argv[]) {
             Diagnostics::check_cfl(fields, cfg, mpi,
                                    mpi.local_L, step_count);
 
-        // ---- animation output ----
-        if (cfg.animate == 1 && (int)(t * 10000) % 1000 == 0)
-            io.write_animate_frame((int)(t * 10000), fields, grid);
+        // ---- VTK animation frame ----
+        if (cfg.vtk_step > 0 && step_count % cfg.vtk_step == 0)
+            io.write_frame(step_count, fields, grid);
 
         // ---- periodic console checkpoint ----
         if (mpi.rank == 0 && step_count % 1000 == 0) {
-            constexpr int check_l_global = 20;
-            constexpr int check_m        = 40;
             if (check_l_global >= mpi.l_start && check_l_global <= mpi.l_end) {
                 const int lc = check_l_global - mpi.l_start + 1;
-                printf("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n",
-                       t,
-                       fields.rho  [lc][check_m],
-                       fields.v_z  [lc][check_m],
-                       fields.v_phi[lc][check_m],
-                       fields.e    [lc][check_m],
-                       fields.H_phi[lc][check_m]);
+                std::printf("%-14.6f %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
+                            t,
+                            fields.rho  [lc][check_m],
+                            fields.v_z  [lc][check_m],
+                            fields.v_phi[lc][check_m],
+                            fields.e    [lc][check_m],
+                            fields.H_phi[lc][check_m]);
             }
         }
-
-        t += cfg.dt;
-        ++step_count;
     }
 
     if (mpi.rank == 0)
-        printf("Calculation time : %lf sec\n", mpi.wtime() - begin);
+        std::printf("\nCalculation time : %.3f sec\n", mpi.wtime() - begin);
 
     // ----------------------------------------------------------------
-    // 5. Gather and write output
+    // 5. Write final VTK frame (always, regardless of vtk_step)
     // ----------------------------------------------------------------
-    io.gather_global(fields, grid);
-    io.write_vtk    ("output_MHD.vtk");
-    io.write_tecplot("28-2D_MHD_LF_rzphi_MPD_MPI.plt");
+    io.write_frame(step_count, fields, grid);
+
+    if (mpi.rank == 0)
+        std::printf("Final VTK written : %s/step_%04d.vtk\n",
+                    io.run_dir().c_str(), step_count);
 
     return 0;
 }

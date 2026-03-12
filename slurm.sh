@@ -13,19 +13,23 @@ export OMP_PLACES=cores
 export OMP_WAIT_POLICY=passive
 # export OMP_PROC_BIND=close
 
+CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
+
 echo "=== SLURM Debug Info ==="
-echo "SLURM_NTASKS: ${SLURM_NTASKS}"
-echo "SLURM_CPUS_PER_TASK: ${SLURM_CPUS_PER_TASK}"
-echo "OMP_NUM_THREADS: ${OMP_NUM_THREADS}"
-echo "OMP_PLACES: ${OMP_PLACES}"
-echo "OMP_PROC_BIND: ${OMP_PROC_BIND}"
-echo "OMP_WAIT_POLICY: ${OMP_WAIT_POLICY}"
-echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
+echo "SLURM_NTASKS:         ${SLURM_NTASKS}"
+echo "SLURM_CPUS_PER_TASK:  ${SLURM_CPUS_PER_TASK}"
+echo "OMP_NUM_THREADS:      ${OMP_NUM_THREADS}"
+echo "OMP_PLACES:           ${OMP_PLACES}"
+echo "OMP_PROC_BIND:        ${OMP_PROC_BIND}"
+echo "OMP_WAIT_POLICY:      ${OMP_WAIT_POLICY}"
+echo "SLURM_JOB_NODELIST:   ${SLURM_JOB_NODELIST}"
+echo "CONFIG_FILE:          ${CONFIG_FILE}"
 echo "Date: $(date)"
 echo "======================"
 
-mpirun -np "${SLURM_NTASKS}" --bind-to core ./build/mpd-plasma-dynamics "${OMP_NUM_THREADS}"
+mpirun -np "${SLURM_NTASKS}" \
+       --bind-to core \
+       ./build/mpd-plasma-dynamics "${CONFIG_FILE}"
 
-# Job summary
 echo "Job completed at $(date)"
 echo "Used ${SLURM_NTASKS} MPI tasks with ${OMP_NUM_THREADS} OpenMP threads each on ${SLURM_JOB_NODELIST}"

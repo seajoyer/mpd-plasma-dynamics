@@ -1,18 +1,16 @@
 #pragma once
 
-/// All compile-time tuneable parameters for the MHD simulation.
-/// Derived quantities (dz, dy) are computed by init().
-/// Command-line arguments are parsed by parse_args().
+#include <string>
+
+/// All tuneable parameters for the MHD simulation.
+///
+/// Primary source is config.yaml (loaded via SimConfig::load()).
+/// Derived quantities (dz, dy) are computed automatically after loading.
 struct SimConfig {
     // ---- physics ----
     double gamma = 1.67;
     double beta  = 0.05;
     double H_z0  = 0.25;
-
-    // ---- convergence ----
-    double convergence_threshold = 0.0;   ///< 0 → disabled
-    int    check_frequency       = 100;
-    int    animate = 0;
 
     // ---- time integration ----
     double T  = 0.5;
@@ -20,16 +18,30 @@ struct SimConfig {
 
     // ---- global grid ----
     int L_max_global = 800;
-    int L_end        = 320;   ///< axial index where inner BC switches regime
+    int L_end        = 320;   ///< axial index where inner-wall BC switches regime
     int M_max        = 400;
 
-    // ---- derived (set by init()) ----
+    // ---- convergence ----
+    double convergence_threshold = 0.0;   ///< 0 → disabled
+    int    check_frequency       = 100;
+
+    // ---- output ----
+    std::string output_dir = "output";  ///< top-level directory for all runs
+    std::string run_name   = "run";     ///< prefix of the per-run sub-directory
+    int         vtk_step   = 100;       ///< write VTK frame every N steps (0 → final only)
+
+    // ---- parallelism ----
+    int openmp_threads = 0;   ///< 0 → defer to OMP_NUM_THREADS env var
+
+    // ---- derived (computed by load / init) ----
     double dz{};
     double dy{};
 
-    /// Compute derived quantities from the primary parameters.
-    void init();
+    /// Load all parameters from a YAML file and compute derived quantities.
+    /// @param path  path to the YAML config file (default: "config.yaml")
+    void load(const std::string& path = "config.yaml");
 
-    /// Parse --converge <value> from argv (skips argv[0] and argv[1]).
-    void parse_args(int argc, char* argv[], int rank);
+private:
+    /// Compute dz and dy from the primary grid parameters.
+    void init();
 };

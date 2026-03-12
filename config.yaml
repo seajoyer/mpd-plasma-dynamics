@@ -1,0 +1,25 @@
+physics:
+  gamma: 1.67
+  beta:  0.05
+  H_z0:  0.25
+
+time:
+  T:  0.5
+  dt: 0.000025
+
+grid:
+  L_max_global: 800
+  L_end:        320
+  M_max:        400
+
+convergence:
+  threshold:       0.0   # 0 → disabled
+  check_frequency: 100
+
+output:
+  directory: output       # top-level output root
+  run_name:  run          # prefix for the timestamped sub-directory
+  vtk_step:  100          # write a VTK frame every N steps (0 → only final)
+
+parallel:
+  openmp_threads: 0       # 0 → honour OMP_NUM_THREADS environment variable

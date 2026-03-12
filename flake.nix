@@ -16,13 +16,15 @@
           packages = with pkgs; [
             cmake
             ninja
-            gcc
+            libcxx
+            libgcc
             
             openmpi
             llvmPackages_latest.openmp
-            llvmPackages_latest.libcxx
             
+            vtk
             clang-tools
+            yaml-cpp
             gdb
           ];
 

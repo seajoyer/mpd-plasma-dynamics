@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
 #include "array2d.hpp"
 #include "config.hpp"
 #include "fields.hpp"
@@ -9,40 +8,45 @@
 #include "mpi_manager.hpp"
 
 /// Handles all file I/O:
-///   - Per-rank Tecplot animation frames (.plt)
-///   - Global VTK structured grid output
-///   - Final global Tecplot result file
+///   - Per-step VTK structured-grid frames (gathered from all MPI ranks)
+///   - Run-scoped timestamped output directory
 ///
-/// The gather step (local → global) is performed by gather_global()
-/// and must be called collectively by every rank before the write routines.
+/// On construction (rank 0) the directory
+///   <cfg.output_dir>/<cfg.run_name>_<DD-MM-YYYY_HH:MM:SS:mmm>/
+/// is created.  The path is broadcast so every rank knows it.
+///
+/// write_frame() is a collective call: all MPI ranks must invoke it
+/// together because it internally gathers distributed field data to rank 0
+/// before writing the VTK file.
 class IOManager {
 public:
     IOManager(const SimConfig& cfg, const MPIManager& mpi);
 
-    // ---- animation (called every N steps, per-rank) ----
+    /// Gather fields from all ranks and write a VTK frame.
+    /// Filename: <run_dir>/step_<step04d>.vtk
+    /// Must be called collectively by every rank.
+    void write_frame(int step, const Fields& f, const Grid& grid);
 
-    /// Write one Tecplot animation frame for this rank.
-    void write_animate_frame(int step, const Fields& f,
-                              const Grid& grid) const;
-
-    // ---- final output (called once at end of simulation) ----
-
-    /// Gather local field data to rank-0 global arrays.
-    /// Must be called collectively.  After return, the global arrays on
-    /// rank 0 are filled; on other ranks they remain empty.
-    void gather_global(const Fields& f, const Grid& grid);
-
-    /// Write VTK structured-grid file (rank 0 only, call after gather).
-    void write_vtk(const std::string& filename) const;
-
-    /// Write Tecplot FEPOINT file (rank 0 only, call after gather).
-    void write_tecplot(const std::string& filename) const;
+    /// Convenience: returns the run directory path (same on all ranks).
+    const std::string& run_dir() const { return run_dir_; }
 
 private:
     const SimConfig&  cfg_;
     const MPIManager& mpi_;
 
-    // Global arrays (non-null on rank 0 after gather_global)
+    std::string run_dir_;   ///< full path to the per-run output directory
+
+    // Global arrays allocated on rank 0 after the first gather.
     Array2D rho_g_, v_z_g_, v_r_g_, v_phi_g_, e_g_;
     Array2D H_z_g_, H_r_g_, H_phi_g_, r_g_;
+
+    // ---- internal helpers ----
+
+    /// Gather one distributed 2-D field to rank-0 global array.
+    /// Both src (local) and dst (global, rank-0 only) use [l][m] indexing.
+    void gather_global(const Fields& f, const Grid& grid);
+
+    /// Build and write a VTK structured-grid file from the global arrays.
+    /// Called by rank 0 only after gather_global().
+    void write_vtk(const std::string& filepath) const;
 };
