@@ -28,7 +28,7 @@ auto main(int argc, char* argv[]) -> int {
     SimulationParams params;
     params.gamma = 1.67;
     params.beta = 0.05;
-    params.H_z0 = 0.125;
+    params.H_z0 = 0.25;
     params.animate = 0;
     params.animation_frequency = 50000;
     params.output_format = "vtk";
@@ -48,7 +48,7 @@ auto main(int argc, char* argv[]) -> int {
 
     params.L_max_global = 800;
     params.L_end = 265;
-    params.M_max = 170;
+    params.M_max = 400;
 
     params.dz = 1.0 / params.L_max_global;
     params.dy = 1.0 / params.M_max;

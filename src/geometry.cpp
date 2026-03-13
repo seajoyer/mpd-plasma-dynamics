@@ -4,7 +4,7 @@
 auto R1(double z) -> double {
     const double z_center = 0.31;      // Центр ступеньки
     const double transition_width = 0.015; // Полуширина перехода (уже в ~5 раз)
-    const double r_before = 0.086;       // Радиус до ступеньки
+    const double r_before = 0.2;       // Радиус до ступеньки
     const double r_after = 0.005;      // Радиус после ступеньки (узкое горло)
 
     // Начало и конец переходной зоны
@@ -29,13 +29,13 @@ auto R1(double z) -> double {
 
 
 auto R2(double z) -> double {
-    return 0.34;
+    return 0.8;
 }
 
 auto DerR1(double z) -> double {
     const double z_center = 0.31;
     const double transition_width = 0.015;
-    const double r_before = 0.086;
+    const double r_before = 0.2;
     const double r_after = 0.005;
 
     const double z_start = z_center - transition_width;
