@@ -1,17 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name=mpd-plasma-hybrid
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=20
 #SBATCH --cpus-per-task=2
-#SBATCH --time=01:30:00
+#SBATCH --time=04:30:00
 #SBATCH --mem=4G
 #SBATCH --output=output/log/mpd-plasma-%j.out
 #SBATCH --error=output/log/mpd-plasma-%j.err
 
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export OMP_PLACES=cores
 export OMP_WAIT_POLICY=passive
-# export OMP_PROC_BIND=close
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export OMP_PROC_BIND=close
 
 CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
 
@@ -28,7 +28,9 @@ echo "Date: $(date)"
 echo "======================"
 
 mpirun -np "${SLURM_NTASKS}" \
-       --bind-to core \
+       --map-by    ppr:${SLURM_NTASKS_PER_NODE}:node:pe=${SLURM_CPUS_PER_TASK} \
+       --bind-to   core \
+       --report-bindings \
        ./build/mpd-plasma-dynamics "${CONFIG_FILE}"
 
 echo "Job completed at $(date)"

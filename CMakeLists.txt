@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(CMAKE_C_COMPILER   gcc)
-set(CMAKE_CXX_COMPILER g++)
-
 project(mpd-plasma-dynamics LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(FETCHCONTENT_QUIET ON)
@@ -16,31 +14,7 @@ include(FetchContent)
 
 include(cmake/Dependencies.cmake)
 
-# --------------------------------------------------------------------------
-# Dependencies
-# --------------------------------------------------------------------------
-
-find_package(MPI    REQUIRED COMPONENTS CXX)
-find_package(OpenMP REQUIRED COMPONENTS CXX)
-
-find_package(VTK REQUIRED COMPONENTS
-    CommonCore
-    CommonDataModel
-    IOLegacy
-    ChartsCore
-    ViewsContext2D
-    RenderingContext2D
-    IOImage
-    RenderingContextOpenGL2
-    RenderingOpenGL2
-)
-
-find_package(yaml-cpp REQUIRED)
-
-# --------------------------------------------------------------------------
-# Sources
-# --------------------------------------------------------------------------
-set(SOURCES
+add_executable(${PROJECT_NAME}
     src/main.cpp
     src/array2d.cpp
     src/config.cpp
@@ -52,30 +26,17 @@ set(SOURCES
     src/solver.cpp
 )
 
-add_executable(${PROJECT_NAME} ${SOURCES})
-
 target_include_directories(${PROJECT_NAME} PRIVATE src include)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    MPI::MPI_CXX
-    OpenMP::OpenMP_CXX
-    ${VTK_LIBRARIES}
-    yaml-cpp::yaml-cpp
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        MPI::MPI_CXX
+        OpenMP::OpenMP_CXX
+        yaml-cpp::yaml-cpp
+
+        VTK::IOLegacy
 )
 
-target_compile_options(${PROJECT_NAME} PRIVATE
-    -Wall -Wextra -Wpedantic -O3
-)
-
-# VTK requires this macro to register its factory initializers.
-vtk_module_autoinit(
-    TARGETS ${PROJECT_NAME}
-    MODULES ${VTK_LIBRARIES}
-)
-
-# --------------------------------------------------------------------------
-# Status messages
-# --------------------------------------------------------------------------
 message(STATUS "Build type          : ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ compiler        : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ standard        : ${CMAKE_CXX_STANDARD}")

@@ -4,8 +4,8 @@ physics:
   H_z0:  0.25
 
 time:
-  T:  0.5
-  dt: 0.000025
+  T:  5.0
+  dt: 0.000020
 
 grid:
   L_max_global: 800
@@ -13,13 +13,13 @@ grid:
   M_max:        400
 
 convergence:
-  threshold:       0.0   # 0 → disabled
+  threshold:       0.0
   check_frequency: 100
 
 output:
-  directory: output       # top-level output root
-  run_name:  run          # prefix for the timestamped sub-directory
-  vtk_step:  100          # write a VTK frame every N steps (0 → only final)
+  directory: output
+  run_name:  run
+  vtk_step:  5000
 
 parallel:
-  openmp_threads: 0       # 0 → honour OMP_NUM_THREADS environment variable
+  openmp_threads: 0
