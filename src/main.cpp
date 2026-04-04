@@ -16,13 +16,12 @@ int main(int argc, char* argv[]) {
     // 1. Configuration
     // ----------------------------------------------------------------
 
-    // Determine config file path: first positional argument or default.
     const char* config_path = (argc > 1) ? argv[1] : "config.yaml";
 
     SimConfig cfg;
     cfg.load(config_path);
 
-    // MPIManager must be constructed before any printing so rank is known.
+    // MPIManager initialises MPI and builds the 2-D Cartesian topology.
     MPIManager mpi(argc, argv, cfg);
 
     if (mpi.rank == 0) {
@@ -30,7 +29,8 @@ int main(int argc, char* argv[]) {
         std::printf("Grid                : %d x %d  (L x M)\n",
                     cfg.L_max_global, cfg.M_max);
         std::printf("Time step / end     : %.6e / %.4f\n", cfg.dt, cfg.T);
-        std::printf("MPI ranks           : %d\n", mpi.size);
+        std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n",
+                    mpi.size, mpi.dims[0], mpi.dims[1]);
 
         if (cfg.convergence_threshold > 0.0)
             std::printf("Convergence check   : threshold = %.2e, every %d steps\n",
@@ -40,15 +40,19 @@ int main(int argc, char* argv[]) {
             std::printf("VTK output every    : %d steps\n", cfg.vtk_step);
     }
 
-    // Apply OpenMP thread count (0 → keep whatever OMP_NUM_THREADS set).
     if (cfg.openmp_threads > 0)
         omp_set_num_threads(cfg.openmp_threads);
 
     // ----------------------------------------------------------------
     // 2. Build grid and initialise fields
     // ----------------------------------------------------------------
-    Grid   grid(cfg, mpi.local_L_with_ghosts, mpi.l_start);
-    Fields fields(mpi.local_L_with_ghosts, cfg.M_max + 1,
+
+    // Grid and Fields are constructed with local dimensions including ghosts.
+    Grid grid(cfg,
+              mpi.local_L_with_ghosts, mpi.l_start,
+              mpi.local_M_with_ghosts, mpi.m_start);
+
+    Fields fields(mpi.local_L_with_ghosts, mpi.local_M_with_ghosts,
                   cfg.convergence_threshold > 0.0);
 
     fields.init_physical    (cfg, grid, mpi.l_start);
@@ -60,23 +64,37 @@ int main(int argc, char* argv[]) {
     // ----------------------------------------------------------------
     // 3. Construct solver and I/O manager
     // ----------------------------------------------------------------
+
     Solver    solver(cfg, mpi, grid, fields);
     IOManager io    (cfg, mpi);
 
     // ----------------------------------------------------------------
     // 4. Time loop
     // ----------------------------------------------------------------
+
     double t          = 0.0;
     int    step_count = 0;
     bool   converged  = false;
 
-    // Print periodic-checkpoint table header before the first row.
+    // Periodic console checkpoint: probe cell at global (l=20, m=40).
+    // Determine which rank owns this cell under the 2-D decomposition.
     constexpr int check_l_global = 20;
-    constexpr int check_m        = 40;
+    constexpr int check_m_global = 40;
 
-    if (mpi.rank == 0
-            && check_l_global >= mpi.l_start
-            && check_l_global <= mpi.l_end) {
+    // Does this rank own the checkpoint cell?
+    const bool owns_checkpoint =
+        (check_l_global >= mpi.l_start && check_l_global <= mpi.l_end) &&
+        (check_m_global >= mpi.m_start && check_m_global <= mpi.m_end);
+
+    // Local indices for the checkpoint cell (ghost offset = 1).
+    const int check_l_local = owns_checkpoint
+                              ? (check_l_global - mpi.l_start + 1) : -1;
+    const int check_m_local = owns_checkpoint
+                              ? (check_m_global - mpi.m_start + 1) : -1;
+
+    // Print table header from rank 0 (which may or may not own the cell;
+    // the actual value is gathered via a reduce below).
+    if (mpi.rank == 0) {
         std::printf("\n%-14s %-14s %-14s %-14s %-14s %-14s\n",
                     "t", "rho", "v_z", "v_phi", "e", "H_phi");
         std::printf("%-14s %-14s %-14s %-14s %-14s %-14s\n",
@@ -101,7 +119,7 @@ int main(int argc, char* argv[]) {
                 && step_count % cfg.check_frequency == 0) {
 
             const double change = Diagnostics::solution_change(
-                fields, mpi.local_L, cfg.M_max);
+                fields, mpi.local_L, mpi.local_M);
 
             if (mpi.rank == 0)
                 std::printf("Step %d, t=%.6f, relative change: %.6e\n",
@@ -119,23 +137,34 @@ int main(int argc, char* argv[]) {
         // ---- CFL check every 100 steps ----
         if (step_count % 100 == 0)
             Diagnostics::check_cfl(fields, cfg, mpi,
-                                   mpi.local_L, step_count);
+                                   mpi.local_L, mpi.local_M, step_count);
 
         // ---- VTK animation frame ----
         if (cfg.vtk_step > 0 && step_count % cfg.vtk_step == 0)
             io.write_frame(step_count, fields, grid);
 
         // ---- periodic console checkpoint ----
-        if (mpi.rank == 0 && step_count % 1000 == 0) {
-            if (check_l_global >= mpi.l_start && check_l_global <= mpi.l_end) {
-                const int lc = check_l_global - mpi.l_start + 1;
+        // The checkpoint cell may live on any rank in the 2-D topology.
+        // Each quantity is gathered to rank 0 via Allreduce with MPI_SUM:
+        // only the owning rank contributes a non-zero value.
+        if (step_count % 1000 == 0) {
+            double local_vals[5] = {0, 0, 0, 0, 0};
+            if (owns_checkpoint) {
+                local_vals[0] = fields.rho  [check_l_local][check_m_local];
+                local_vals[1] = fields.v_z  [check_l_local][check_m_local];
+                local_vals[2] = fields.v_phi[check_l_local][check_m_local];
+                local_vals[3] = fields.e    [check_l_local][check_m_local];
+                local_vals[4] = fields.H_phi[check_l_local][check_m_local];
+            }
+            double global_vals[5];
+            MPI_Reduce(local_vals, global_vals, 5, MPI_DOUBLE, MPI_SUM,
+                       0, MPI_COMM_WORLD);
+
+            if (mpi.rank == 0) {
                 std::printf("%-14.6f %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
                             t,
-                            fields.rho  [lc][check_m],
-                            fields.v_z  [lc][check_m],
-                            fields.v_phi[lc][check_m],
-                            fields.e    [lc][check_m],
-                            fields.H_phi[lc][check_m]);
+                            global_vals[0], global_vals[1], global_vals[2],
+                            global_vals[3], global_vals[4]);
             }
         }
     }

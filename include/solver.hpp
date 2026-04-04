@@ -7,13 +7,20 @@
 #include "mpi_manager.hpp"
 
 /// Owns the numerical time-stepping algorithm:
-///   1. Ghost-cell exchange (MPI)
-///   2. Lax–Friedrichs central update
-///   3. Boundary conditions
-///   4. Physical-variable reconstruction
+///   1. Ghost-cell exchange in all four Cartesian directions (MPI)
+///   2. Lax–Friedrichs central update for interior cells
+///   3. Boundary conditions on the appropriate ranks
+///   4. Physical-variable reconstruction from conservative u
 ///   5. Advance u0 ← u
 ///
-/// The public interface is a single advance() call.
+/// BC rank predicate:
+///   apply_bc_left / apply_bc_right  → mpi.is_l_lo / l_hi boundary
+///   apply_bc_upper / apply_bc_lower → mpi.is_m_hi / m_lo boundary
+///
+/// Inner-wall index convention (design decision 3):
+///   On the m-lo boundary rank m_local=1 IS the inner wall cell.
+///   Every reference to the first interior cell above the wall uses [m+1]
+///   (= [2] when m=1), never a hardcoded [1].
 class Solver {
 public:
     Solver(const SimConfig& cfg, const MPIManager& mpi,
@@ -28,30 +35,35 @@ private:
     const Grid&       grid_;
     Fields&           f_;
 
-    // MPI scratch buffers (size M_max + 1)
-    std::vector<double> sl_, sr_, rl_, rr_;
+    // ---- MPI scratch buffers ----
+    // l-direction (row exchange): size >= local_M_with_ghosts
+    std::vector<double> row_sl_, row_sr_, row_rl_, row_rr_;
+    // m-direction (column exchange, packed): size >= local_L_with_ghosts
+    std::vector<double> col_sl_, col_sr_, col_rl_, col_rr_;
 
     // ---- sub-steps ----
 
-    /// Exchange ghost cells for all 18 arrays (8 conservative + 10 physical).
+    /// Exchange ghost cells for all 18 arrays (8 conservative + 10 physical)
+    /// in all four Cartesian directions.
     void exchange_all_ghosts();
 
-    /// Lax–Friedrichs update for interior cells (l=1..local_L, m=1..M_max-1).
+    /// Lax–Friedrichs update for interior cells.
+    /// l ∈ [1..local_L],  m ∈ [m_lo..m_hi] where m_lo/m_hi skip wall cells
+    /// owned by this rank.
     void compute_central_update();
 
-    /// Reconstruct physical vars from u for the central interior only.
-    /// Called after compute_central_update so that the BC routines below
-    /// can use up-to-date neighbour values.
+    /// Reconstruct physical vars from u for the central interior.
+    /// Called after compute_central_update so BC routines see up-to-date
+    /// neighbour values.
     void update_central_physical();
 
     // ---- boundary conditions ----
-    void apply_bc_left();             ///< inflow BC at z = 0  (rank 0 only)
-    void apply_bc_right();            ///< outflow BC at z = L (last rank only)
-    void apply_bc_upper();            ///< outer-wall BC (m = M_max)
-    void apply_bc_lower_inner();      ///< axis BC for l ≤ L_end (m = 0)
-    void apply_bc_lower_outer();      ///< axis BC for l > L_end (m = 0, free)
+    void apply_bc_left();             ///< inflow BC at z = 0  (l-lo rank only)
+    void apply_bc_right();            ///< outflow BC at z = L (l-hi rank only)
+    void apply_bc_upper();            ///< outer-wall BC at m_local=local_M (m-hi rank only)
+    void apply_bc_lower_inner();      ///< inner-wall BC, l ≤ L_end (m-lo rank only)
+    void apply_bc_lower_outer();      ///< inner-wall free BC, l > L_end (m-lo rank only)
 
-    /// Rebuild u from the physical values set by the BC routines
-    /// at the cell (l, m).
+    /// Rebuild u from the physical values set by the BC routines at (l, m).
     inline void rebuild_u_from_physical(int l, int m);
 };

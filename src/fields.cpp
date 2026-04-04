@@ -34,9 +34,12 @@ void Fields::init_physical(const SimConfig& cfg,
     const double H_z0  = cfg.H_z0;
     const double dz    = cfg.dz;
 
+    // Loop over interior cells only: [1..local_L][1..local_M].
+    // Ghost cells are left at default (0) and will be populated by the first
+    // ghost exchange before any stencil computation.
     #pragma omp parallel for collapse(2)
     for (int l = 1; l < rows - 1; ++l) {
-        for (int m = 0; m < cols; ++m) {
+        for (int m = 1; m < cols - 1; ++m) {
             const int l_global = l_start + l - 1;
 
             rho  [l][m] = 1.0;
@@ -44,6 +47,8 @@ void Fields::init_physical(const SimConfig& cfg,
             v_r  [l][m] = 0.1;
             v_phi[l][m] = 0.0;
 
+            // grid.r[l][m] is already in local coordinates and maps to the
+            // correct global physical r value via Grid::build().
             H_phi[l][m] = (1.0 - 0.9 * l_global * dz) * grid.r_0 / grid.r[l][m];
             H_z  [l][m] = H_z0;
             H_r  [l][m] = H_z[l][m] * grid.r_z[l][m];
@@ -58,9 +63,10 @@ void Fields::init_physical(const SimConfig& cfg,
 }
 
 void Fields::init_conservative(const Grid& grid) {
+    // Interior cells only: ghost cells have undefined physical values at init.
     #pragma omp parallel for collapse(2)
     for (int l = 1; l < rows - 1; ++l) {
-        for (int m = 0; m < cols; ++m) {
+        for (int m = 1; m < cols - 1; ++m) {
             u0_1[l][m] = rho [l][m] * grid.r[l][m];
             u0_2[l][m] = rho [l][m] * v_z [l][m] * grid.r[l][m];
             u0_3[l][m] = rho [l][m] * v_r [l][m] * grid.r[l][m];

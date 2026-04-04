@@ -11,19 +11,20 @@ namespace Diagnostics {
 
 /// Compute the global maximum wave speed across all MPI ranks.
 /// Includes sound speed, Alfvén speed, and bulk flow speed.
-/// @return  max( |v| + c_s + c_a )  over all cells and all processes.
+/// @return  max( |v| + c_s + c_a )  over all interior cells on all processes.
 double max_wave_speed(const Fields& f, const SimConfig& cfg,
-                      int local_L, int M_max);
+                      int local_L, int local_M,
+                      const MPIManager& mpi);
 
 /// Compute the relative change in the solution between the current
 /// fields and the fields stored in the prev arrays.
 /// Returns ||curr - prev|| / ||curr||  (L2 norm summed over all 7 fields).
-double solution_change(const Fields& f, int local_L, int M_max);
+double solution_change(const Fields& f, int local_L, int local_M);
 
 /// Emit a CFL warning if the current time step exceeds the CFL limit.
 /// Only prints on rank 0 and only every 1000 steps.
 void check_cfl(const Fields& f, const SimConfig& cfg,
                const MPIManager& mpi,
-               int local_L, int step_count);
+               int local_L, int local_M, int step_count);
 
 } // namespace Diagnostics

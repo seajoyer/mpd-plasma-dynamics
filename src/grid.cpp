@@ -2,12 +2,14 @@
 
 #include <cmath>
 
-Grid::Grid(const SimConfig& cfg_, int lwg, int ls)
+Grid::Grid(const SimConfig& cfg_, int lwg, int ls, int lmwg, int ms)
     : cfg(cfg_),
       local_L_with_ghosts(lwg),
       l_start(ls),
-      r  (lwg, cfg_.M_max + 1),
-      r_z(lwg, cfg_.M_max + 1),
+      local_M_with_ghosts(lmwg),
+      m_start(ms),
+      r  (lwg, lmwg),
+      r_z(lwg, lmwg),
       R  (lwg, 0.0),
       dr (lwg, 0.0)
 {
@@ -25,11 +27,14 @@ void Grid::build() {
         const double z        = l_global * dz;
 
         R[l]  = r2(z) - r1(z);
-        dr[l] = R[l] / cfg.M_max;
+        dr[l] = R[l] / cfg.M_max;   // global radial cell spacing
 
-        for (int m = 0; m < cfg.M_max + 1; ++m) {
-            r  [l][m] = (1.0 - m * dy) * r1(z) + m * dy * r2(z);
-            r_z[l][m] = (1.0 - m * dy) * der_r1(z) + m * dy * der_r2(z);
+        for (int m = 0; m < local_M_with_ghosts; ++m) {
+            // m == 0 is the inner ghost column; its global index is m_start - 1.
+            const int    m_global = m_start + m - 1;
+            const double frac     = m_global * dy;   // == m_global / M_max
+            r  [l][m] = (1.0 - frac) * r1(z) + frac * r2(z);
+            r_z[l][m] = (1.0 - frac) * der_r1(z) + frac * der_r2(z);
         }
     }
 }

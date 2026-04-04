@@ -6,18 +6,23 @@
 
 /// Owns every 2-D field array needed by the simulation.
 ///
-/// Conservative variable naming follows the original code:
+/// With 2-D MPI decomposition the array dimensions are:
+///   rows = local_L_with_ghosts  (= local_L + 2)
+///   cols = local_M_with_ghosts  (= local_M + 2)
+///
+/// Interior cells occupy [1..local_L][1..local_M].
+/// Ghost cells are at row 0, row local_L+1, col 0, col local_M+1.
+///
+/// Conservative variable naming:
 ///   u0_* = values at the beginning of the current time step
 ///   u_*  = values being computed for the next time step
 ///
-/// Physical variable naming is self-explanatory (rho, v_z, …).
-///
-/// Optional "prev" arrays (rho_prev, …) are allocated only when
-/// convergence checking is enabled (has_prev == true).
+/// Optional "prev" arrays are allocated only when convergence checking is
+/// enabled (has_prev == true).
 class Fields {
 public:
-    int rows;   ///< local_L_with_ghosts
-    int cols;   ///< M_max + 1
+    int rows;       ///< local_L_with_ghosts
+    int cols;       ///< local_M_with_ghosts
     bool has_prev;
 
     // ---- conservative variables ----
@@ -33,14 +38,16 @@ public:
     Array2D rho_prev,   v_z_prev,   v_r_prev,   v_phi_prev;
     Array2D H_z_prev,   H_r_prev,   H_phi_prev;
 
-    /// @param rows      local_L_with_ghosts
-    /// @param cols      M_max + 1
-    /// @param with_prev allocate prev arrays
+    /// @param rows      local_L_with_ghosts  (= local_L + 2)
+    /// @param cols      local_M_with_ghosts  (= local_M + 2)
+    /// @param with_prev allocate prev arrays for convergence checking
     Fields(int rows, int cols, bool with_prev = false);
 
     // ---- initialisation ----
 
-    /// Set initial conditions on physical arrays for interior cells.
+    /// Set initial conditions on physical arrays for interior cells
+    /// [1..local_L][1..local_M].  Ghost cells are left uninitialised; they
+    /// will be filled by the first ghost exchange in Solver::advance().
     void init_physical(const SimConfig& cfg, const Grid& grid, int l_start);
 
     /// Compute conservative arrays u0_* from the already-set physical arrays.
@@ -51,8 +58,7 @@ public:
     /// Copy current physical arrays into the prev snapshot.
     void save_prev();
 
-    /// Update physical vars from u_* for a range of l-indices (inclusive).
-    /// m range: [m_lo, m_hi] inclusive.
+    /// Update physical vars from u_* for a range of local indices (inclusive).
     void update_physical_from_u(const Grid& grid, const SimConfig& cfg,
                                  int l_lo, int l_hi, int m_lo, int m_hi);
 
