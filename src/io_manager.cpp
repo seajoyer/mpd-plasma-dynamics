@@ -84,7 +84,7 @@ void IOManager::write_frame(int step, const Fields& f, const Grid& grid) {
 }
 
 // ============================================================
-// Static helpers: pack / unpack
+// Static helpers: pack / unpack / fill-rank
 // ============================================================
 
 void IOManager::pack_field(const Array2D& src, int local_L, int local_M,
@@ -103,6 +103,16 @@ void IOManager::unpack_into_global(Array2D& dst,
     for (int l = 0; l < block_L; ++l)
         for (int m = 0; m < block_M; ++m)
             dst[gl + l][gm + m] = buf[l * block_M + m];
+}
+
+void IOManager::fill_rank_block(Array2D& dst, double rank_id,
+                                 int gl, int gm,
+                                 int block_L, int block_M) {
+    // No data transfer needed — rank 0 already knows which block belongs to
+    // which rank from the gather envelope, so we just stamp the value.
+    for (int l = 0; l < block_L; ++l)
+        for (int m = 0; m < block_M; ++m)
+            dst[gl + l][gm + m] = rank_id;
 }
 
 // ============================================================
@@ -124,6 +134,7 @@ void IOManager::gather_global(const Fields& f, const Grid& grid) {
         ensure(v_phi_g_); ensure(e_g_);
         ensure(H_z_g_);  ensure(H_r_g_);  ensure(H_phi_g_);
         ensure(r_g_);
+        ensure(rank_g_);
     }
 
     // ---------- message tag layout: tag = field_index (0-8) --------------
@@ -172,6 +183,8 @@ void IOManager::gather_global(const Fields& f, const Grid& grid) {
             pack_field(*local_fields[fi], local_L, local_M, buf);
             unpack_into_global(*global_fields[fi], buf, gl, gm, local_L, local_M);
         }
+        // Rank field: no send/recv needed — stamp rank 0's block directly.
+        fill_rank_block(rank_g_, 0.0, gl, gm, local_L, local_M);
     }
 
     // ---------- rank 0: receive from all other ranks ---------------------
@@ -195,6 +208,9 @@ void IOManager::gather_global(const Fields& f, const Grid& grid) {
             unpack_into_global(*global_fields[fi], recv_buf,
                                gl, gm, block_L, block_M);
         }
+        // Rank field: the envelope already tells us the owning rank — no
+        // extra message required.
+        fill_rank_block(rank_g_, static_cast<double>(src), gl, gm, block_L, block_M);
     }
 }
 
@@ -266,6 +282,12 @@ void IOManager::write_vtk(const std::string& filepath) const {
     add_scalar("Energy", e_g_);
     add_scalar("Vphi",   v_phi_g_);
     add_scalar("Hphi",   H_phi_g_);
+
+    // ---- MPI domain decomposition visualisation ------------------------
+    // Each cell is coloured by the rank that owns it.  In ParaView, apply
+    // a "Surface" representation with the "MPI_Rank" array and a categorical
+    // colour map to see individual subdomains at a glance.
+    add_scalar("MPI_Rank", rank_g_);
 
     // ---- derived scalars -----------------------------------------------
     {

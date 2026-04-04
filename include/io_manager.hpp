@@ -43,6 +43,7 @@ private:
     // Global arrays, allocated on rank 0 the first time gather_global runs.
     Array2D rho_g_, v_z_g_, v_r_g_, v_phi_g_, e_g_;
     Array2D H_z_g_, H_r_g_, H_phi_g_, r_g_;
+    Array2D rank_g_;   ///< MPI rank that owns each cell — for decomposition visualisation.
 
     // ---- internal helpers ----
 
@@ -61,6 +62,13 @@ private:
                                    const std::vector<double>& buf,
                                    int gl, int gm,
                                    int block_L, int block_M);
+
+    /// Fill every cell in the global rank array owned by a given MPI rank.
+    /// Called on rank 0 only — no communication required because the block
+    /// geometry is already known from the gather envelope.
+    static void fill_rank_block(Array2D& dst, double rank_id,
+                                int gl, int gm,
+                                int block_L, int block_M);
 
     /// Build and write a VTK structured-grid file from the global arrays.
     /// Called by rank 0 only after gather_global().
