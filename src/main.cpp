@@ -38,9 +38,18 @@ int main(int argc, char* argv[]) {
         std::printf("Config file         : %s\n", config_path);
         std::printf("Grid                : %d x %d  (L x M)\n",
                     cfg.L_max_global, cfg.M_max);
-        std::printf("Time step / end     : %.6e / %.4f\n", cfg.dt, cfg.T);
+        std::printf("Initial dt / T end  : %.6e / %.4f\n", cfg.dt, cfg.T);
         std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n",
                     mpi.size, mpi.dims[0], mpi.dims[1]);
+
+        if (cfg.adaptive_dt) {
+            std::printf("Adaptive dt         : ON  (CFL=%.2f, growth=%.2f, "
+                        "dt_min=%.1e, dt_max=%.1e)\n",
+                        cfg.cfl_number, cfg.dt_growth_factor,
+                        cfg.dt_min, cfg.dt_max);
+        } else {
+            std::printf("Adaptive dt         : OFF (fixed dt=%.6e)\n", cfg.dt);
+        }
 
         if (cfg.convergence_threshold > 0.0)
             std::printf("Convergence check   : threshold = %.2e, every %d steps\n",
@@ -57,7 +66,6 @@ int main(int argc, char* argv[]) {
     // 2. Build grid and initialise fields
     // ----------------------------------------------------------------
 
-    // Grid and Fields are constructed with local dimensions including ghosts.
     Grid grid(cfg,
               mpi.local_L_with_ghosts, mpi.l_start,
               mpi.local_M_with_ghosts, mpi.m_start);
@@ -86,30 +94,30 @@ int main(int argc, char* argv[]) {
     int    step_count = 0;
     bool   converged  = false;
 
+    // dt for the upcoming step.  Initialised from config; updated each step
+    // when adaptive_dt is enabled.
+    double dt = cfg.dt;
+
     // Periodic console checkpoint: probe cell at global (l=20, m=40).
-    // Determine which rank owns this cell under the 2-D decomposition.
     constexpr int check_l_global = 20;
     constexpr int check_m_global = 40;
 
-    // Does this rank own the checkpoint cell?
     const bool owns_checkpoint =
         (check_l_global >= mpi.l_start && check_l_global <= mpi.l_end) &&
         (check_m_global >= mpi.m_start && check_m_global <= mpi.m_end);
 
-    // Local indices for the checkpoint cell (ghost offset = 1).
     const int check_l_local = owns_checkpoint
                               ? (check_l_global - mpi.l_start + 1) : -1;
     const int check_m_local = owns_checkpoint
                               ? (check_m_global - mpi.m_start + 1) : -1;
 
-    // Print table header from rank 0 (which may or may not own the cell;
-    // the actual value is gathered via a reduce below).
     if (mpi.rank == 0) {
-        std::printf("\n%-14s %-14s %-14s %-14s %-14s %-14s\n",
-                    "t", "rho", "v_z", "v_phi", "e", "H_phi");
-        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s\n",
+        std::printf("\n%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
+                    "t", "dt", "rho", "v_z", "v_phi", "e", "H_phi");
+        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
                     "--------------", "--------------", "--------------",
-                    "--------------", "--------------", "--------------");
+                    "--------------", "--------------", "--------------",
+                    "--------------");
     }
 
     // Write step 0 before the loop starts.
@@ -120,22 +128,33 @@ int main(int argc, char* argv[]) {
 
     while (t < cfg.T && !converged) {
 
-        solver.advance();
-        t += cfg.dt;
+        // Clamp dt so we land exactly on T without overshooting.
+        if (t + dt > cfg.T)
+            dt = cfg.T - t;
+
+        solver.advance(dt);
+        t          += dt;
         ++step_count;
 
-        // ---- convergence check ----
+        // ---- adaptive dt: recompute from updated fields ------------------
+        // We compute the new dt *after* the step so we can use the freshly
+        // updated wave speeds.  The growth-rate cap in compute_dt() prevents
+        // the step from jumping too far if the wave speed dropped sharply.
+        if (cfg.adaptive_dt) {
+            dt = Diagnostics::compute_dt(fields, cfg,
+                                         mpi.local_L, mpi.local_M, mpi, dt);
+        }
+
+        // ---- convergence check -------------------------------------------
         if (cfg.convergence_threshold > 0.0
                 && step_count % cfg.check_frequency == 0) {
 
             const double change = Diagnostics::solution_change(
                 fields, mpi.local_L, mpi.local_M);
 
-            if (mpi.rank == 0) {
-                std::printf("Step %d, t=%.6f, relative change: %.6e\n",
-                            step_count, t, change);
-                // No explicit fflush needed — stdout is now unbuffered.
-            }
+            if (mpi.rank == 0)
+                std::printf("Step %d, t=%.6f, dt=%.6e, relative change: %.6e\n",
+                            step_count, t, dt, change);
 
             if (change < cfg.convergence_threshold) {
                 converged = true;
@@ -146,19 +165,18 @@ int main(int argc, char* argv[]) {
             fields.save_prev();
         }
 
-        // ---- CFL check every 100 steps ----
+        // ---- CFL sanity check every 100 steps ----------------------------
+        // With adaptive_dt this should never fire; it acts as a safety net.
         if (step_count % 100 == 0)
             Diagnostics::check_cfl(fields, cfg, mpi,
-                                   mpi.local_L, mpi.local_M, step_count);
+                                   mpi.local_L, mpi.local_M,
+                                   dt, step_count);
 
-        // ---- VTK animation frame ----
+        // ---- VTK animation frame ----------------------------------------
         if (cfg.vtk_step > 0 && step_count % cfg.vtk_step == 0)
             io.write_frame(step_count, fields, grid);
 
-        // ---- periodic console checkpoint ----
-        // The checkpoint cell may live on any rank in the 2-D topology.
-        // Each quantity is gathered to rank 0 via Allreduce with MPI_SUM:
-        // only the owning rank contributes a non-zero value.
+        // ---- periodic console checkpoint --------------------------------
         if (step_count % 1000 == 0) {
             double local_vals[5] = {0, 0, 0, 0, 0};
             if (owns_checkpoint) {
@@ -173,17 +191,17 @@ int main(int argc, char* argv[]) {
                        0, MPI_COMM_WORLD);
 
             if (mpi.rank == 0) {
-                std::printf("%-14.6f %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
-                            t,
+                std::printf("%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
+                            t, dt,
                             global_vals[0], global_vals[1], global_vals[2],
                             global_vals[3], global_vals[4]);
-                // stdout is unbuffered, so this appears in the log immediately.
             }
         }
     }
 
     if (mpi.rank == 0)
-        std::printf("\nCalculation time : %.3f sec\n", mpi.wtime() - begin);
+        std::printf("\nCalculation time : %.3f sec  (%d steps)\n",
+                    mpi.wtime() - begin, step_count);
 
     // ----------------------------------------------------------------
     // 5. Write final VTK frame (always, regardless of vtk_step)

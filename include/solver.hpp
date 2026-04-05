@@ -13,6 +13,9 @@
 ///   4. Physical-variable reconstruction from conservative u
 ///   5. Advance u0 ← u
 ///
+/// The time step `dt` is passed explicitly to advance() so that the caller
+/// (main loop) can drive adaptive time stepping independently of this class.
+///
 /// BC rank predicate:
 ///   apply_bc_left / apply_bc_right  → mpi.is_l_lo / l_hi boundary
 ///   apply_bc_upper / apply_bc_lower → mpi.is_m_hi / m_lo boundary
@@ -26,14 +29,23 @@ public:
     Solver(const SimConfig& cfg, const MPIManager& mpi,
            const Grid& grid, Fields& f);
 
-    /// Execute one complete time step.
-    void advance();
+    /// Execute one complete time step using the supplied dt.
+    ///
+    /// When adaptive time stepping is active, the main loop computes dt via
+    /// Diagnostics::compute_dt() after each step and passes the new value
+    /// here.  When adaptive stepping is disabled the main loop simply passes
+    /// cfg.dt unchanged every call.
+    void advance(double dt);
 
 private:
     const SimConfig&  cfg_;
     const MPIManager& mpi_;
     const Grid&       grid_;
     Fields&           f_;
+
+    /// The dt value for the step currently being computed.
+    /// Set at the top of advance() and read by all private sub-steps.
+    double current_dt_{0.0};
 
     // ---- MPI scratch buffer for the batched ghost exchange -----------------
     // Holds packed column data for all 18 arrays × 4 directions.

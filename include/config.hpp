@@ -14,7 +14,30 @@ struct SimConfig {
 
     // ---- time integration ----
     double T  = 0.5;
-    double dt = 0.000025;
+    double dt = 0.000025;   ///< initial (and fixed) time step when adaptive_dt = false
+
+    // ---- adaptive time step -----------------------------------------------
+    /// Enable CFL-driven adaptive time stepping.
+    /// When true, dt is recomputed after every step from the current wave
+    /// speeds.  The value of `dt` above is used only as the starting step.
+    bool   adaptive_dt      = false;
+
+    /// Target CFL number.  Must be in (0, 1).  Typical value: 0.5.
+    double cfl_number       = 0.5;
+
+    /// Maximum factor by which dt may grow between consecutive steps.
+    /// Prevents runaway growth when the wave speed drops suddenly.
+    /// Typical value: 1.1 (allow at most 10 % growth per step).
+    double dt_growth_factor = 1.1;
+
+    /// Hard lower bound on dt (guards against stiff wave-speed spikes
+    /// that would reduce dt to near zero and stall the simulation).
+    double dt_min = 1.0e-9;
+
+    /// Hard upper bound on dt (prevents dt from growing beyond what the
+    /// physics or output schedule can tolerate).
+    double dt_max = 1.0e-3;
+    // -----------------------------------------------------------------------
 
     // ---- global grid ----
     int L_max_global = 800;
@@ -35,15 +58,6 @@ struct SimConfig {
 
     /// MPI Cartesian decomposition hints.
     /// 0 means "let MPI_Dims_create decide".
-    ///
-    /// For pure-MPI runs (openmp_threads == 0 or 1) it is almost always
-    /// faster to set mpi_dims_m = 1 (1-D decomposition along L only) because:
-    ///   - the inner m-loop stays at M_max iterations → auto-vectorised;
-    ///   - MPI ghost exchange never needs to pack non-contiguous columns;
-    ///   - MPI message count is halved (only 2 neighbours instead of 4).
-    ///
-    /// For hybrid MPI+OpenMP runs set mpi_dims_m > 1 and let OpenMP threads
-    /// cover the M dimension within each rank.
     int mpi_dims_l = 0;   ///< 0 = auto
     int mpi_dims_m = 0;   ///< 0 = auto; set to 1 for pure-MPI runs
 

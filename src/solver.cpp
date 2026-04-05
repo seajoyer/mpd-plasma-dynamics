@@ -10,15 +10,15 @@
 Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
                const Grid& grid, Fields& f)
     : cfg_(cfg), mpi_(mpi), grid_(grid), f_(f)
-    // col_sl_/col_sr_/col_rl_/col_rr_ from the old single-array path are no
-    // longer needed; the batched exchange manages its own internal buffer.
 {}
 
 // ============================================================
 // Public entry point
 // ============================================================
 
-void Solver::advance() {
+void Solver::advance(double dt) {
+    current_dt_ = dt;
+
     exchange_all_ghosts();
     compute_central_update();
     update_central_physical();
@@ -35,14 +35,8 @@ void Solver::advance() {
 // ============================================================
 // Ghost-cell exchange  (all 4 directions, all 18 arrays, one phase)
 // ============================================================
-//
-// Previously this called exchange_ghosts() 18 times in a loop, producing 18
-// sequential MPI_Waitall barriers.  The batched API posts all Isend/Irecv for
-// every array before a single Waitall, so the network can pipeline all 18
-// transfers simultaneously.
 
 void Solver::exchange_all_ghosts() {
-    // 8 conservative + 10 physical = 18 arrays in one non-blocking round.
     double** arrs[18] = {
         // conservative
         f_.u0_1.raw(), f_.u0_2.raw(), f_.u0_3.raw(), f_.u0_4.raw(),
@@ -62,10 +56,10 @@ void Solver::exchange_all_ghosts() {
 // ============================================================
 
 void Solver::compute_central_update() {
-    const int local_L = mpi_.local_L;
-    const int local_M = mpi_.local_M;
-    const double dt   = cfg_.dt;
-    const double dz   = cfg_.dz;
+    const int    local_L = mpi_.local_L;
+    const int    local_M = mpi_.local_M;
+    const double dt      = current_dt_;   // set by advance()
+    const double dz      = cfg_.dz;
 
     const int m_lo = mpi_.is_m_lo_boundary() ? 2 : 1;
     const int m_hi = mpi_.is_m_hi_boundary() ? local_M - 1 : local_M;
@@ -287,13 +281,12 @@ void Solver::apply_bc_lower_inner() {
 void Solver::apply_bc_lower_outer() {
     if (!mpi_.is_m_lo_boundary()) return;
 
-    const int local_L = mpi_.local_L;
-    const int L_end   = cfg_.L_end;
-    const int L_max   = cfg_.L_max_global;
-    const int l_start = mpi_.l_start;
-
-    const double dt  = cfg_.dt;
-    const double dz  = cfg_.dz;
+    const int    local_L = mpi_.local_L;
+    const int    L_end   = cfg_.L_end;
+    const int    L_max   = cfg_.L_max_global;
+    const int    l_start = mpi_.l_start;
+    const double dt      = current_dt_;   // set by advance()
+    const double dz      = cfg_.dz;
 
     auto** u0_1 = f_.u0_1.raw(); auto** u0_2 = f_.u0_2.raw();
     auto** u0_5 = f_.u0_5.raw(); auto** u0_7 = f_.u0_7.raw();

@@ -5,7 +5,22 @@ physics:
 
 time:
   T:  5.0
-  dt: 0.000020
+  dt: 0.000020   # initial dt; also the fixed dt when adaptive_dt.enabled = false
+
+# ── Adaptive time stepping ──────────────────────────────────────────────────
+# When enabled, dt is recomputed after every step to keep the simulation at
+# the target CFL number.  The `dt` above is only used as the starting step.
+#
+# Recommended workflow:
+#   1. Run once with adaptive_dt.enabled: false to get a baseline.
+#   2. Enable adaptive_dt and set cfl_number ≤ 0.5 for stability.
+#   3. Tighten dt_min / dt_max if the wave speed varies widely.
+adaptive_dt:
+  enabled:       false   # set to true to activate CFL-driven stepping
+  cfl_number:    0.45    # target CFL (< 0.5 for Lax–Friedrichs stability)
+  growth_factor: 1.10    # max dt growth factor per step (e.g. 1.10 = +10 %)
+  dt_min:        1.0e-9  # hard lower bound (prevents stall on wave-speed spike)
+  dt_max:        1.0e-3  # hard upper bound
 
 grid:
   L_max_global: 800

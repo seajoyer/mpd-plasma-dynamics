@@ -1,9 +1,9 @@
 #include "diagnostics.hpp"
 
 #include <mpi.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <algorithm>
 
 namespace Diagnostics {
 
@@ -40,6 +40,28 @@ double max_wave_speed(const Fields& f, const SimConfig& cfg,
     MPI_Allreduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX,
                   MPI_COMM_WORLD);
     return global_max;
+}
+
+// ============================================================
+// compute_dt
+// ============================================================
+
+double compute_dt(const Fields& f, const SimConfig& cfg,
+                  int local_L, int local_M,
+                  const MPIManager& mpi,
+                  double dt_current) {
+    const double speed = max_wave_speed(f, cfg, local_L, local_M, mpi);
+
+    // CFL-limited step: dt = C * dx / max_speed
+    // A small epsilon prevents division by zero in a perfectly quiescent field.
+    const double dx     = std::min(cfg.dz, cfg.dy);
+    const double dt_cfl = cfg.cfl_number * dx / (speed + 1.0e-10);
+
+    // Limit growth to prevent sudden jumps when wave speeds drop sharply.
+    const double dt_grown = dt_current * cfg.dt_growth_factor;
+
+    // Apply growth cap first, then hard bounds.
+    return std::clamp(std::min(dt_cfl, dt_grown), cfg.dt_min, cfg.dt_max);
 }
 
 // ============================================================
@@ -89,14 +111,16 @@ double solution_change(const Fields& f, int local_L, int local_M) {
 
 void check_cfl(const Fields& f, const SimConfig& cfg,
                const MPIManager& mpi,
-               int local_L, int local_M, int step_count) {
+               int local_L, int local_M,
+               double dt, int step_count) {
     const double speed  = max_wave_speed(f, cfg, local_L, local_M, mpi);
     const double dx     = std::min(cfg.dz, cfg.dy);
-    const double dt_max = 0.5 * dx / (speed + 1e-10);   // CFL = 0.5
+    const double dt_max = cfg.cfl_number * dx / (speed + 1.0e-10);
 
-    if (cfg.dt > dt_max && mpi.rank == 0 && step_count % 1000 == 0) {
-        std::printf("WARNING: dt=%.6e exceeds CFL limit dt_max=%.6e "
-                    "(max_speed=%.3f)\n", cfg.dt, dt_max, speed);
+    if (dt > dt_max && mpi.rank == 0 && step_count % 1000 == 0) {
+        std::printf("WARNING [step %d]: dt=%.6e exceeds CFL limit dt_max=%.6e "
+                    "(max_speed=%.3f, CFL=%.2f)\n",
+                    step_count, dt, dt_max, speed, dt / dt_max * cfg.cfl_number);
     }
 }
 

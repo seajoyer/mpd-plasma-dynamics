@@ -35,6 +35,15 @@ void SimConfig::load(const std::string& path) {
         if (n["dt"]) dt = n["dt"].as<double>();
     }
 
+    // ---- adaptive time step ------------------------------------------------
+    if (auto n = cfg["adaptive_dt"]) {
+        if (n["enabled"])      adaptive_dt      = n["enabled"]     .as<bool>();
+        if (n["cfl_number"])   cfl_number        = n["cfl_number"]  .as<double>();
+        if (n["growth_factor"])dt_growth_factor  = n["growth_factor"].as<double>();
+        if (n["dt_min"])       dt_min            = n["dt_min"]      .as<double>();
+        if (n["dt_max"])       dt_max            = n["dt_max"]      .as<double>();
+    }
+
     // ---- grid --------------------------------------------------------------
     if (auto n = cfg["grid"]) {
         if (n["L_max_global"]) L_max_global = n["L_max_global"].as<int>();
