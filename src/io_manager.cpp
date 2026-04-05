@@ -190,10 +190,11 @@ void IOManager::gather_global(const Fields& f, const Grid& grid) {
     // ---------- rank 0: receive from all other ranks ---------------------
     std::vector<double> recv_buf;
     for (int src = 1; src < mpi_.size; ++src) {
-        // Receive envelope
+        // Receive envelope.
+        // MPI_STATUS_IGNORE (singular) is the correct handle for a single MPI_Recv.
         int env[4];
         MPI_Recv(env, 4, MPI_INT, src, /*tag=*/100,
-                 MPI_COMM_WORLD, MPI_STATUSES_IGNORE);
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         const int gl       = env[0];
         const int gm       = env[1];

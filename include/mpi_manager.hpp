@@ -61,20 +61,17 @@ public:
     ///
     /// @param arr     double** of size [local_L_with_ghosts][local_M_with_ghosts]
     ///
-    /// Row buffers (l-direction, contiguous sends):
-    ///   row_sl / row_sr : send buffers, size >= local_M_with_ghosts
-    ///   row_rl / row_rr : recv buffers, size >= local_M_with_ghosts
-    ///
     /// Column buffers (m-direction, packed sends):
     ///   col_sl / col_sr : send buffers, size >= local_L_with_ghosts
     ///   col_rl / col_rr : recv buffers, size >= local_L_with_ghosts
+    ///
+    /// Rows in the l-direction are contiguous in memory and are sent directly
+    /// from / received into arr without intermediate copies.
     ///
     /// All four directions are issued non-blocking and waited on in a single
     /// MPI_Waitall.  Corner ghosts are never read by the 5-point stencil so
     /// no special treatment is required.
     void exchange_ghosts(double** arr,
-                         double* row_sl, double* row_sr,
-                         double* row_rl, double* row_rr,
                          double* col_sl, double* col_sr,
                          double* col_rl, double* col_rr) const;
 };

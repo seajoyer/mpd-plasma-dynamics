@@ -10,9 +10,6 @@
 Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
                const Grid& grid, Fields& f)
     : cfg_(cfg), mpi_(mpi), grid_(grid), f_(f),
-      // Row buffers for l-direction ghost exchange (each row is contiguous).
-      row_sl_(mpi.local_M_with_ghosts), row_sr_(mpi.local_M_with_ghosts),
-      row_rl_(mpi.local_M_with_ghosts), row_rr_(mpi.local_M_with_ghosts),
       // Column buffers for m-direction ghost exchange (packed).
       col_sl_(mpi.local_L_with_ghosts), col_sr_(mpi.local_L_with_ghosts),
       col_rl_(mpi.local_L_with_ghosts), col_rr_(mpi.local_L_with_ghosts)
@@ -43,7 +40,6 @@ void Solver::advance() {
 void Solver::exchange_all_ghosts() {
     auto exchange = [&](double** arr) {
         mpi_.exchange_ghosts(arr,
-            row_sl_.data(), row_sr_.data(), row_rl_.data(), row_rr_.data(),
             col_sl_.data(), col_sr_.data(), col_rl_.data(), col_rr_.data());
     };
 
@@ -289,13 +285,15 @@ void Solver::apply_bc_lower_inner() {
     const int L_end_in_domain = std::min(L_end, l_end_g);
     const int local_L_end_rel = L_end_in_domain - l_start + 1;
 
-    for (int l = 1; l <= local_L_end_rel; ++l) {
-        const int l_global = l_start + l - 1;
-        if (l_global < 1 || l_global > L_end) continue;
+    // On the l-lo boundary rank, l_local=1 corresponds to l_global=0 which is
+    // the inflow plane handled by apply_bc_left — skip it here.
+    const int l_lo = mpi_.is_l_lo_boundary() ? 2 : 1;
 
+    #pragma omp parallel for
+    for (int l = l_lo; l <= local_L_end_rel; ++l) {
         // m=1  : inner wall cell  (m_global = 0)
         // m+1=2: first interior cell above the wall
-        const int m = 1;
+        constexpr int m = 1;
         f_.rho  [l][m] = f_.rho  [l][m+1];
         f_.v_z  [l][m] = f_.v_z  [l][m+1];
         f_.v_r  [l][m] = f_.v_z  [l][m+1] * grid_.r_z[l][m+1];

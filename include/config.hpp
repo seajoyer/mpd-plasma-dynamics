@@ -37,6 +37,9 @@ struct SimConfig {
     double dz{};
     double dy{};
 
+    /// Ensure dz and dy are consistent with the default grid parameters.
+    SimConfig() { init(); }
+
     /// Load all parameters from a YAML file and compute derived quantities.
     /// @param path  path to the YAML config file (default: "config.yaml")
     void load(const std::string& path = "config.yaml");

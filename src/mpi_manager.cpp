@@ -57,15 +57,13 @@ MPIManager::~MPIManager() {
 // ============================================================
 
 void MPIManager::exchange_ghosts(double** arr,
-                                  double* row_sl, double* row_sr,
-                                  double* row_rl, double* row_rr,
                                   double* col_sl, double* col_sr,
                                   double* col_rl, double* col_rr) const {
     const int nrows = local_L_with_ghosts;  // local_L + 2
     const int ncols = local_M_with_ghosts;  // local_M + 2
 
     // Pack column send buffers before launching any Isend.
-    // (Row send buffers point directly into arr[1] / arr[local_L].)
+    // Rows in the l-direction are contiguous and sent directly from arr.
     if (nbr_m_lo != MPI_PROC_NULL)
         for (int l = 0; l < nrows; ++l) col_sl[l] = arr[l][1];
     if (nbr_m_hi != MPI_PROC_NULL)
@@ -74,7 +72,7 @@ void MPIManager::exchange_ghosts(double** arr,
     MPI_Request reqs[8];
     int nreq = 0;
 
-    // L-direction — rows are contiguous in memory.
+    // L-direction — rows are contiguous in memory; send/receive directly.
     // Tag convention: 0 = l_lo→l_hi data,  1 = l_hi→l_lo data.
     if (nbr_l_lo != MPI_PROC_NULL) {
         MPI_Isend(arr[1],         ncols, MPI_DOUBLE, nbr_l_lo, 0, cart_comm, &reqs[nreq++]);

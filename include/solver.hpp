@@ -35,10 +35,9 @@ private:
     const Grid&       grid_;
     Fields&           f_;
 
-    // ---- MPI scratch buffers ----
-    // l-direction (row exchange): size >= local_M_with_ghosts
-    std::vector<double> row_sl_, row_sr_, row_rl_, row_rr_;
-    // m-direction (column exchange, packed): size >= local_L_with_ghosts
+    // ---- MPI scratch buffers for m-direction (column) ghost exchange ----
+    // Rows in the l-direction are contiguous and exchanged directly from the
+    // array without intermediate copies.
     std::vector<double> col_sl_, col_sr_, col_rl_, col_rr_;
 
     // ---- sub-steps ----
