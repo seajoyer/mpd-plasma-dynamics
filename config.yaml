@@ -22,4 +22,17 @@ output:
   vtk_step:  5000
 
 parallel:
-  openmp_threads: 0
+  openmp_threads: 0   # 0 = defer to OMP_NUM_THREADS
+
+  # MPI Cartesian decomposition.
+  # 0 means "let MPI_Dims_create choose automatically".
+  #
+  # Pure-MPI benchmark (--cpus-per-task=1, all ranks on one axis):
+  #   mpi_dims_l: 0   # fills with total rank count
+  #   mpi_dims_m: 1   # 1-D decomposition: no column packing, wider inner loop
+  #
+  # Hybrid MPI+OpenMP (e.g. 12 MPI × 4 OMP):
+  #   mpi_dims_l: 0   # auto
+  #   mpi_dims_m: 0   # auto 2-D split; OpenMP covers M within each rank
+  mpi_dims_l: 0
+  mpi_dims_m: 1   # set to 1 for pure-MPI runs; 0 for hybrid MPI+OMP

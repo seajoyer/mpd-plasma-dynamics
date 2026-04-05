@@ -7,6 +7,10 @@
 /// Wraps MPI initialisation / finalisation and owns a 2-D Cartesian domain
 /// decomposition along both the z-axis (l-direction) and r-axis (m-direction).
 ///
+/// Decomposition dimensions are driven by SimConfig::mpi_dims_l / mpi_dims_m.
+/// Set mpi_dims_m = 1 in config.yaml for pure-MPI runs to keep the full M
+/// range on each rank (better vectorisation, no column packing overhead).
+///
 /// Indexing convention (mirrors Fields/Grid):
 ///   Interior cells : l ∈ [1..local_L],  m ∈ [1..local_M]
 ///   Ghost cells    : l = 0, l = local_L+1,  m = 0, m = local_M+1
@@ -45,6 +49,8 @@ public:
     bool is_m_hi_boundary() const { return coords[1] == dims[1] - 1; }
 
     /// Initialises MPI and computes 2-D domain decomposition.
+    /// Decomposition dimensions are taken from cfg.mpi_dims_l / mpi_dims_m
+    /// (0 = let MPI_Dims_create decide).
     MPIManager(int& argc, char**& argv, const SimConfig& cfg);
 
     /// Frees the Cartesian communicator and calls MPI_Finalize.
@@ -59,9 +65,7 @@ public:
     /// Exchange one layer of ghost cells in all four Cartesian directions for
     /// a single 2-D array.
     ///
-    /// Prefer exchange_ghosts_batch() when exchanging multiple arrays at once —
-    /// it posts all non-blocking ops for every array before calling Waitall,
-    /// which is ~N× more efficient for N arrays.
+    /// Prefer exchange_ghosts_batch() when exchanging multiple arrays at once.
     ///
     /// Column buffers (m-direction, packed sends):
     ///   col_sl / col_sr : send buffers, size >= local_L_with_ghosts
@@ -72,16 +76,19 @@ public:
 
     /// Exchange ghost cells for N arrays in a single non-blocking round.
     ///
-    /// All Isend/Irecv calls for every array are posted before a single
-    /// MPI_Waitall, so the network transfer for all arrays overlaps.
+    /// All N arrays' data for each direction are merged into ONE MPI message
+    /// per direction (max 4 Isend + 4 Irecv = 8 MPI calls total, regardless
+    /// of N).  The old per-array approach issued up to N*4*2 = 144 calls for
+    /// N=18 arrays — the merged approach reduces MPI latency overhead by ~18×.
     ///
-    /// @param arrs      array of N double** pointers, each of size
-    ///                  [local_L_with_ghosts][local_M_with_ghosts]
-    /// @param n         number of arrays
-    /// @param col_bufs  scratch space: must be at least
-    ///                  4 * n * local_L_with_ghosts doubles.
-    ///                  Layout: [ send_lo | send_hi | recv_lo | recv_hi ]
-    ///                  repeated for each array.
+    /// Row copies (L-direction) use memcpy since Array2D rows are contiguous.
+    /// Column copies (M-direction) loop with a constant stride equal to
+    /// local_M_with_ghosts, which the CPU prefetcher handles efficiently.
+    ///
+    /// @param arrs      array of N double** pointers
+    /// @param n         number of arrays (typically 18)
+    /// @param col_bufs  scratch space — resized automatically each call.
+    ///                  Reused across calls to avoid repeated allocation.
     void exchange_ghosts_batch(double** const* arrs, int n,
                                std::vector<double>& col_bufs) const;
 };

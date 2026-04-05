@@ -33,6 +33,20 @@ struct SimConfig {
     // ---- parallelism ----
     int openmp_threads = 0;   ///< 0 → defer to OMP_NUM_THREADS env var
 
+    /// MPI Cartesian decomposition hints.
+    /// 0 means "let MPI_Dims_create decide".
+    ///
+    /// For pure-MPI runs (openmp_threads == 0 or 1) it is almost always
+    /// faster to set mpi_dims_m = 1 (1-D decomposition along L only) because:
+    ///   - the inner m-loop stays at M_max iterations → auto-vectorised;
+    ///   - MPI ghost exchange never needs to pack non-contiguous columns;
+    ///   - MPI message count is halved (only 2 neighbours instead of 4).
+    ///
+    /// For hybrid MPI+OpenMP runs set mpi_dims_m > 1 and let OpenMP threads
+    /// cover the M dimension within each rank.
+    int mpi_dims_l = 0;   ///< 0 = auto
+    int mpi_dims_m = 0;   ///< 0 = auto; set to 1 for pure-MPI runs
+
     // ---- derived (computed by load / init) ----
     double dz{};
     double dy{};

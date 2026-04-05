@@ -58,6 +58,8 @@ void SimConfig::load(const std::string& path) {
     // ---- parallelism -------------------------------------------------------
     if (auto n = cfg["parallel"]) {
         if (n["openmp_threads"]) openmp_threads = n["openmp_threads"].as<int>();
+        if (n["mpi_dims_l"])     mpi_dims_l     = n["mpi_dims_l"]    .as<int>();
+        if (n["mpi_dims_m"])     mpi_dims_m     = n["mpi_dims_m"]    .as<int>();
     }
 
     // Derived quantities must be recomputed after grid params are loaded.

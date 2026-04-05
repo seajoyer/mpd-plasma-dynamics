@@ -1,5 +1,7 @@
 #include "mpi_manager.hpp"
 
+#include <cstring>
+
 // ============================================================
 // Constructor
 // ============================================================
@@ -9,8 +11,10 @@ MPIManager::MPIManager(int& argc, char**& argv, const SimConfig& cfg) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // ---- 2-D Cartesian decomposition ----------------------------------------
-    dims[0] = dims[1] = 0;
+    // ---- Cartesian decomposition ----------------------------------------
+    // Start from the config hints (0 = let MPI_Dims_create decide).
+    dims[0] = cfg.mpi_dims_l;
+    dims[1] = cfg.mpi_dims_m;
     MPI_Dims_create(size, 2, dims);
 
     int periods[2] = {0, 0};
@@ -93,99 +97,124 @@ void MPIManager::exchange_ghosts(double** arr,
 }
 
 // ============================================================
-// Batched ghost exchange — all N arrays in one non-blocking round
+// Batched ghost exchange — all N arrays, ONE message per direction
 // ============================================================
 //
-// Why this is faster than N sequential single-array exchanges:
+// Performance analysis of the old approach (N separate Isend/Irecv per
+// direction):
+//   Each MPI_Isend call has a fixed latency overhead (typically 1–3 µs on
+//   InfiniBand even for tiny messages).  With N=18 arrays × 4 directions =
+//   72 Isend + 72 Irecv = 144 MPI calls per time step.  At 1 µs each that
+//   is 144 µs of pure MPI overhead before any data moves.
 //
-//   Sequential:  for each array  { pack → 8×Isend/Irecv → Waitall → unpack }
-//                = N serialised network round-trips.
+// New approach — ONE merged message per direction:
+//   All N arrays' row/column data for a given direction are packed into a
+//   single contiguous buffer; one Isend/Irecv pair carries all 18 arrays
+//   at once.  Total: 4 Isend + 4 Irecv = 8 MPI calls per step.
+//   MPI latency overhead drops by ~18×.
 //
-//   Batched:     pack all → 8×N×Isend/Irecv → one Waitall → unpack all
-//                = 1 network round-trip; the NIC can pipeline all transfers.
+// Row copies (L-direction) use memcpy because Array2D stores rows as
+// contiguous slabs — a single memcpy(dst, arr[l], ncols*8) replaces a
+// per-element loop.
 //
-// Tag layout (must not collide with the single-array exchange tags 0-3):
-//   Each array i uses tags  10 + i*4 + {0,1,2,3}
-//   With n ≤ 18 arrays the maximum tag is 10 + 17*4 + 3 = 81, well within
-//   any MPI implementation's MPI_TAG_UB (≥ 32767).
+// Column copies (M-direction) still loop element-by-element but the stride
+// is now a constant (ncols_per_array, known at compile time from Array2D's
+// contiguous layout) rather than a scattered pointer chase, so the CPU's
+// hardware prefetcher handles it cleanly.
 //
-// col_bufs layout:
-//   Segment for array i starts at  i * 4 * nrows.
-//   Within the segment: [0..nrows-1]         = send_lo  (m-lo column)
-//                       [nrows..2nrows-1]     = send_hi  (m-hi column)
-//                       [2nrows..3nrows-1]    = recv_lo
-//                       [3nrows..4nrows-1]    = recv_hi
+// Buffer layout in col_bufs (size = 4 * n * max(nrows, ncols)):
+//
+//   [0 .. n*ncols-1]           row send_lo  (all arrays × first interior row)
+//   [n*ncols .. 2*n*ncols-1]   row send_hi  (all arrays × last  interior row)
+//   [2*n*ncols .. 3*n*ncols-1] row recv_lo  (ghost row 0 destination)
+//   [3*n*ncols .. 4*n*ncols-1] row recv_hi  (ghost row local_L+1 destination)
+//   [4*n*ncols .. 4*n*ncols + n*nrows - 1]         col send_lo (column 1)
+//   [4*n*ncols + n*nrows .. 4*n*ncols + 2*n*nrows] col send_hi (column local_M)
+//   [4*n*ncols + 2*n*nrows .. ... + 3*n*nrows]     col recv_lo
+//   [4*n*ncols + 3*n*nrows .. ... + 4*n*nrows]     col recv_hi
 
 void MPIManager::exchange_ghosts_batch(double** const* arrs, int n,
                                         std::vector<double>& col_bufs) const {
     const int nrows = local_L_with_ghosts;
     const int ncols = local_M_with_ghosts;
 
-    col_bufs.resize(static_cast<std::size_t>(n) * 4 * nrows);
+    // Merged buffer: 4 row sections (each n*ncols) + 4 col sections (each n*nrows)
+    const int row_seg = n * ncols;   // doubles per merged row direction message
+    const int col_seg = n * nrows;   // doubles per merged col direction message
+    col_bufs.resize(static_cast<std::size_t>(4) * row_seg
+                  + static_cast<std::size_t>(4) * col_seg);
 
-    // ---- Pack all m-direction send columns ----------------------------------
+    double* row_sl = col_bufs.data();                    // send to l-lo
+    double* row_sr = row_sl + row_seg;                   // send to l-hi
+    double* row_rl = row_sr + row_seg;                   // recv from l-lo
+    double* row_rr = row_rl + row_seg;                   // recv from l-hi
+    double* col_sl = row_rr + row_seg;                   // send to m-lo
+    double* col_sr = col_sl + col_seg;                   // send to m-hi
+    double* col_rl = col_sr + col_seg;                   // recv from m-lo
+    double* col_rr = col_rl + col_seg;                   // recv from m-hi
+
+    // ---- Pack row sends (L-direction) using memcpy -------------------------
+    // Array2D rows are contiguous so this is a fast bulk copy.
     for (int i = 0; i < n; ++i) {
-        double* sl = col_bufs.data() + i * 4 * nrows + 0 * nrows;
-        double* sr = col_bufs.data() + i * 4 * nrows + 1 * nrows;
         double** a = arrs[i];
+        if (nbr_l_lo != MPI_PROC_NULL)
+            std::memcpy(row_sl + i * ncols, a[1],       ncols * sizeof(double));
+        if (nbr_l_hi != MPI_PROC_NULL)
+            std::memcpy(row_sr + i * ncols, a[local_L], ncols * sizeof(double));
+    }
+
+    // ---- Pack column sends (M-direction) -----------------------------------
+    // With contiguous Array2D storage, a[l][1] = slab_base + l*ncols + 1.
+    // Stride between elements is ncols — the CPU prefetcher handles this well.
+    for (int i = 0; i < n; ++i) {
+        double** a  = arrs[i];
+        double*  sl = col_sl + i * nrows;
+        double*  sr = col_sr + i * nrows;
         if (nbr_m_lo != MPI_PROC_NULL)
             for (int l = 0; l < nrows; ++l) sl[l] = a[l][1];
         if (nbr_m_hi != MPI_PROC_NULL)
             for (int l = 0; l < nrows; ++l) sr[l] = a[l][local_M];
     }
 
-    // ---- Post all non-blocking sends and receives ---------------------------
-    // Upper bound: 8 requests per array (4 directions × send+recv).
-    std::vector<MPI_Request> reqs;
-    reqs.reserve(static_cast<std::size_t>(n) * 8);
+    // ---- Post ONE Isend + ONE Irecv per active direction -------------------
+    // Maximum 4 sends + 4 recvs = 8 MPI calls total (vs 72 in the old code).
+    MPI_Request reqs[8];
+    int nreq = 0;
 
-    for (int i = 0; i < n; ++i) {
-        double** a  = arrs[i];
-        const int t = 10 + i * 4;   // base tag for this array
-
-        // L-direction: rows are contiguous — send/recv directly from the array.
-        if (nbr_l_lo != MPI_PROC_NULL) {
-            MPI_Request r0, r1;
-            MPI_Isend(a[1],         ncols, MPI_DOUBLE, nbr_l_lo, t+0, cart_comm, &r0);
-            MPI_Irecv(a[0],         ncols, MPI_DOUBLE, nbr_l_lo, t+1, cart_comm, &r1);
-            reqs.push_back(r0); reqs.push_back(r1);
-        }
-        if (nbr_l_hi != MPI_PROC_NULL) {
-            MPI_Request r0, r1;
-            MPI_Isend(a[local_L],   ncols, MPI_DOUBLE, nbr_l_hi, t+1, cart_comm, &r0);
-            MPI_Irecv(a[local_L+1], ncols, MPI_DOUBLE, nbr_l_hi, t+0, cart_comm, &r1);
-            reqs.push_back(r0); reqs.push_back(r1);
-        }
-
-        // M-direction: use packed column buffers.
-        double* sl = col_bufs.data() + i * 4 * nrows + 0 * nrows;
-        double* sr = col_bufs.data() + i * 4 * nrows + 1 * nrows;
-        double* rl = col_bufs.data() + i * 4 * nrows + 2 * nrows;
-        double* rr = col_bufs.data() + i * 4 * nrows + 3 * nrows;
-
-        if (nbr_m_lo != MPI_PROC_NULL) {
-            MPI_Request r0, r1;
-            MPI_Isend(sl, nrows, MPI_DOUBLE, nbr_m_lo, t+2, cart_comm, &r0);
-            MPI_Irecv(rl, nrows, MPI_DOUBLE, nbr_m_lo, t+3, cart_comm, &r1);
-            reqs.push_back(r0); reqs.push_back(r1);
-        }
-        if (nbr_m_hi != MPI_PROC_NULL) {
-            MPI_Request r0, r1;
-            MPI_Isend(sr, nrows, MPI_DOUBLE, nbr_m_hi, t+3, cart_comm, &r0);
-            MPI_Irecv(rr, nrows, MPI_DOUBLE, nbr_m_hi, t+2, cart_comm, &r1);
-            reqs.push_back(r0); reqs.push_back(r1);
-        }
+    if (nbr_l_lo != MPI_PROC_NULL) {
+        MPI_Isend(row_sl, row_seg, MPI_DOUBLE, nbr_l_lo, 0, cart_comm, &reqs[nreq++]);
+        MPI_Irecv(row_rl, row_seg, MPI_DOUBLE, nbr_l_lo, 1, cart_comm, &reqs[nreq++]);
+    }
+    if (nbr_l_hi != MPI_PROC_NULL) {
+        MPI_Isend(row_sr, row_seg, MPI_DOUBLE, nbr_l_hi, 1, cart_comm, &reqs[nreq++]);
+        MPI_Irecv(row_rr, row_seg, MPI_DOUBLE, nbr_l_hi, 0, cart_comm, &reqs[nreq++]);
+    }
+    if (nbr_m_lo != MPI_PROC_NULL) {
+        MPI_Isend(col_sl, col_seg, MPI_DOUBLE, nbr_m_lo, 2, cart_comm, &reqs[nreq++]);
+        MPI_Irecv(col_rl, col_seg, MPI_DOUBLE, nbr_m_lo, 3, cart_comm, &reqs[nreq++]);
+    }
+    if (nbr_m_hi != MPI_PROC_NULL) {
+        MPI_Isend(col_sr, col_seg, MPI_DOUBLE, nbr_m_hi, 3, cart_comm, &reqs[nreq++]);
+        MPI_Irecv(col_rr, col_seg, MPI_DOUBLE, nbr_m_hi, 2, cart_comm, &reqs[nreq++]);
     }
 
-    // ---- Wait for all transfers to complete ---------------------------------
-    if (!reqs.empty())
-        MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), MPI_STATUSES_IGNORE);
+    if (nreq > 0)
+        MPI_Waitall(nreq, reqs, MPI_STATUSES_IGNORE);
 
-    // ---- Unpack all m-direction receive columns ----------------------------
+    // ---- Unpack row receives (L-direction) using memcpy --------------------
+    for (int i = 0; i < n; ++i) {
+        double** a = arrs[i];
+        if (nbr_l_lo != MPI_PROC_NULL)
+            std::memcpy(a[0],           row_rl + i * ncols, ncols * sizeof(double));
+        if (nbr_l_hi != MPI_PROC_NULL)
+            std::memcpy(a[local_L + 1], row_rr + i * ncols, ncols * sizeof(double));
+    }
+
+    // ---- Unpack column receives (M-direction) ------------------------------
     for (int i = 0; i < n; ++i) {
         double** a  = arrs[i];
-        double*  rl = col_bufs.data() + i * 4 * nrows + 2 * nrows;
-        double*  rr = col_bufs.data() + i * 4 * nrows + 3 * nrows;
+        double*  rl = col_rl + i * nrows;
+        double*  rr = col_rr + i * nrows;
         if (nbr_m_lo != MPI_PROC_NULL)
             for (int l = 0; l < nrows; ++l) a[l][0]         = rl[l];
         if (nbr_m_hi != MPI_PROC_NULL)
