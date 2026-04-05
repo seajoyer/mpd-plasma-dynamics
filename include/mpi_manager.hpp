@@ -59,19 +59,29 @@ public:
     /// Exchange one layer of ghost cells in all four Cartesian directions for
     /// a single 2-D array.
     ///
-    /// @param arr     double** of size [local_L_with_ghosts][local_M_with_ghosts]
+    /// Prefer exchange_ghosts_batch() when exchanging multiple arrays at once —
+    /// it posts all non-blocking ops for every array before calling Waitall,
+    /// which is ~N× more efficient for N arrays.
     ///
     /// Column buffers (m-direction, packed sends):
     ///   col_sl / col_sr : send buffers, size >= local_L_with_ghosts
     ///   col_rl / col_rr : recv buffers, size >= local_L_with_ghosts
-    ///
-    /// Rows in the l-direction are contiguous in memory and are sent directly
-    /// from / received into arr without intermediate copies.
-    ///
-    /// All four directions are issued non-blocking and waited on in a single
-    /// MPI_Waitall.  Corner ghosts are never read by the 5-point stencil so
-    /// no special treatment is required.
     void exchange_ghosts(double** arr,
                          double* col_sl, double* col_sr,
                          double* col_rl, double* col_rr) const;
+
+    /// Exchange ghost cells for N arrays in a single non-blocking round.
+    ///
+    /// All Isend/Irecv calls for every array are posted before a single
+    /// MPI_Waitall, so the network transfer for all arrays overlaps.
+    ///
+    /// @param arrs      array of N double** pointers, each of size
+    ///                  [local_L_with_ghosts][local_M_with_ghosts]
+    /// @param n         number of arrays
+    /// @param col_bufs  scratch space: must be at least
+    ///                  4 * n * local_L_with_ghosts doubles.
+    ///                  Layout: [ send_lo | send_hi | recv_lo | recv_hi ]
+    ///                  repeated for each array.
+    void exchange_ghosts_batch(double** const* arrs, int n,
+                               std::vector<double>& col_bufs) const;
 };

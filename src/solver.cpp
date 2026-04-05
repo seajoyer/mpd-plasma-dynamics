@@ -9,10 +9,9 @@
 
 Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
                const Grid& grid, Fields& f)
-    : cfg_(cfg), mpi_(mpi), grid_(grid), f_(f),
-      // Column buffers for m-direction ghost exchange (packed).
-      col_sl_(mpi.local_L_with_ghosts), col_sr_(mpi.local_L_with_ghosts),
-      col_rl_(mpi.local_L_with_ghosts), col_rr_(mpi.local_L_with_ghosts)
+    : cfg_(cfg), mpi_(mpi), grid_(grid), f_(f)
+    // col_sl_/col_sr_/col_rl_/col_rr_ from the old single-array path are no
+    // longer needed; the batched exchange manages its own internal buffer.
 {}
 
 // ============================================================
@@ -34,30 +33,28 @@ void Solver::advance() {
 }
 
 // ============================================================
-// Ghost-cell exchange  (all 4 directions, all 18 arrays)
+// Ghost-cell exchange  (all 4 directions, all 18 arrays, one phase)
 // ============================================================
+//
+// Previously this called exchange_ghosts() 18 times in a loop, producing 18
+// sequential MPI_Waitall barriers.  The batched API posts all Isend/Irecv for
+// every array before a single Waitall, so the network can pipeline all 18
+// transfers simultaneously.
 
 void Solver::exchange_all_ghosts() {
-    auto exchange = [&](double** arr) {
-        mpi_.exchange_ghosts(arr,
-            col_sl_.data(), col_sr_.data(), col_rl_.data(), col_rr_.data());
-    };
-
-    // 8 conservative arrays
-    double** u0_ptrs[8] = {
+    // 8 conservative + 10 physical = 18 arrays in one non-blocking round.
+    double** arrs[18] = {
+        // conservative
         f_.u0_1.raw(), f_.u0_2.raw(), f_.u0_3.raw(), f_.u0_4.raw(),
-        f_.u0_5.raw(), f_.u0_6.raw(), f_.u0_7.raw(), f_.u0_8.raw()
-    };
-    for (auto* arr : u0_ptrs) exchange(arr);
-
-    // 10 physical arrays
-    double** phys_ptrs[10] = {
+        f_.u0_5.raw(), f_.u0_6.raw(), f_.u0_7.raw(), f_.u0_8.raw(),
+        // physical
         f_.rho.raw(),   f_.v_z.raw(),   f_.v_r.raw(),
         f_.v_phi.raw(), f_.e.raw(),     f_.p.raw(),
         f_.P.raw(),     f_.H_z.raw(),   f_.H_r.raw(),
         f_.H_phi.raw()
     };
-    for (auto* arr : phys_ptrs) exchange(arr);
+
+    mpi_.exchange_ghosts_batch(arrs, 18, col_batch_buf_);
 }
 
 // ============================================================
@@ -70,13 +67,9 @@ void Solver::compute_central_update() {
     const double dt   = cfg_.dt;
     const double dz   = cfg_.dz;
 
-    // Skip wall cells owned by this rank:
-    //   bottom rank (is_m_lo_boundary): m=1 is inner wall → start at m=2
-    //   top    rank (is_m_hi_boundary): m=local_M is outer wall → end at local_M-1
     const int m_lo = mpi_.is_m_lo_boundary() ? 2 : 1;
     const int m_hi = mpi_.is_m_hi_boundary() ? local_M - 1 : local_M;
 
-    // Raw double** aliases for the performance-critical inner loop.
     auto** u0_1 = f_.u0_1.raw();  auto** u0_2 = f_.u0_2.raw();
     auto** u0_3 = f_.u0_3.raw();  auto** u0_4 = f_.u0_4.raw();
     auto** u0_5 = f_.u0_5.raw();  auto** u0_6 = f_.u0_6.raw();
@@ -194,8 +187,6 @@ inline void Solver::rebuild_u_from_physical(int l, int m) {
 // Boundary conditions
 // ============================================================
 
-// ---- Inflow BC (z = 0, l-lo boundary rank) -------------------------
-
 void Solver::apply_bc_left() {
     if (!mpi_.is_l_lo_boundary()) return;
 
@@ -210,7 +201,6 @@ void Solver::apply_bc_left() {
         constexpr int l = 1;
         f_.rho  [l][m] = 1.0;
         f_.v_phi[l][m] = 0.0;
-        // v_z derived from z-momentum of the updated neighbour at l=2.
         f_.v_z  [l][m] = f_.u_2[2][m] / (f_.rho[l][m] * grid_.r[l][m]);
         f_.v_r  [l][m] = 0.0;
         f_.H_phi[l][m] = r_0 / grid_.r[l][m];
@@ -222,8 +212,6 @@ void Solver::apply_bc_left() {
         rebuild_u_from_physical(l, m);
     }
 }
-
-// ---- Outflow BC (z = L, l-hi boundary rank) ------------------------
 
 void Solver::apply_bc_right() {
     if (!mpi_.is_l_hi_boundary()) return;
@@ -244,13 +232,11 @@ void Solver::apply_bc_right() {
     }
 }
 
-// ---- Outer-wall BC (m = M_max, m-hi boundary rank) -----------------
-
 void Solver::apply_bc_upper() {
     if (!mpi_.is_m_hi_boundary()) return;
 
     const int local_L = mpi_.local_L;
-    const int local_M = mpi_.local_M;   // m_local=local_M  ≡  m_global=M_max
+    const int local_M = mpi_.local_M;
 
     #pragma omp parallel for
     for (int l = 1; l <= local_L; ++l) {
@@ -268,11 +254,6 @@ void Solver::apply_bc_upper() {
     }
 }
 
-// ---- Inner-wall BC, convergent section (l_global ≤ L_end, m-lo rank) ---
-//
-// Design decision 3: the inner wall lives at m_local=1 on the bottom rank.
-// All references to "the first interior cell above the wall" use [m+1] = [2].
-
 void Solver::apply_bc_lower_inner() {
     if (!mpi_.is_m_lo_boundary()) return;
 
@@ -285,14 +266,10 @@ void Solver::apply_bc_lower_inner() {
     const int L_end_in_domain = std::min(L_end, l_end_g);
     const int local_L_end_rel = L_end_in_domain - l_start + 1;
 
-    // On the l-lo boundary rank, l_local=1 corresponds to l_global=0 which is
-    // the inflow plane handled by apply_bc_left — skip it here.
     const int l_lo = mpi_.is_l_lo_boundary() ? 2 : 1;
 
     #pragma omp parallel for
     for (int l = l_lo; l <= local_L_end_rel; ++l) {
-        // m=1  : inner wall cell  (m_global = 0)
-        // m+1=2: first interior cell above the wall
         constexpr int m = 1;
         f_.rho  [l][m] = f_.rho  [l][m+1];
         f_.v_z  [l][m] = f_.v_z  [l][m+1];
@@ -306,15 +283,6 @@ void Solver::apply_bc_lower_inner() {
         rebuild_u_from_physical(l, m);
     }
 }
-
-// ---- Inner-wall BC, divergent section (l_global > L_end, m-lo rank) ----
-//
-// One-sided Lax–Friedrichs-like update at the inner wall.
-// The stencil uses [m] (wall) and [m+1] (first interior cell) in the
-// r-direction only; there is no [m-1] term.
-//
-// Design decision 3: [m+1] = [2] when m=1.  The single hardcoded [1] in the
-// mass-flux term (v_r[l][1] in the original code) is replaced by [m+1].
 
 void Solver::apply_bc_lower_outer() {
     if (!mpi_.is_m_lo_boundary()) return;
@@ -336,7 +304,6 @@ void Solver::apply_bc_lower_outer() {
     auto** r    = grid_.r.raw();
     const double* dr = grid_.dr.data();
 
-    // m=1 is the inner wall; m+1=2 is the first interior cell above it.
     constexpr int m = 1;
 
     #pragma omp parallel for
@@ -346,10 +313,6 @@ void Solver::apply_bc_lower_outer() {
 
         const double dr_l = dr[l];
 
-        // u1: mass conservation.
-        // The advective flux in the r-direction uses v_r at [m+1] for the
-        // "interior" side and v_r at [m+1] (= first interior) for the "wall"
-        // side — matching the original one-sided axis stencil.
         f_.u_1[l][m] =
             (0.25 * (u0_1[l+1][m]/r[l+1][m] + u0_1[l-1][m]/r[l-1][m]
                    + u0_1[l][m+1]/r[l][m+1]  + u0_1[l][m]/r[l][m])
@@ -359,7 +322,6 @@ void Solver::apply_bc_lower_outer() {
                       -u0_1[l][m]/r[l][m]*v_r[l][m+1])       / dr_l))
             * r[l][m];
 
-        // u2: z-momentum.
         f_.u_2[l][m] =
             (0.25 * (u0_2[l+1][m]/r[l+1][m] + u0_2[l-1][m]/r[l-1][m]
                    + u0_2[l][m+1]/r[l][m+1]  + u0_2[l][m]/r[l][m])
@@ -372,11 +334,9 @@ void Solver::apply_bc_lower_outer() {
                       -u0_2[l][m]/r[l][m]*v_r[l][m])           / dr_l))
             * r[l][m];
 
-        // u3, u4: r- and phi-momentum vanish at the inner wall.
         f_.u_3[l][m] = 0.0;
         f_.u_4[l][m] = 0.0;
 
-        // u5: internal energy.
         f_.u_5[l][m] =
             (0.25 * (u0_5[l+1][m]/r[l+1][m] + u0_5[l-1][m]/r[l-1][m]
                    + u0_5[l][m+1]/r[l][m+1]  + u0_5[l][m]/r[l][m])
@@ -388,10 +348,8 @@ void Solver::apply_bc_lower_outer() {
                       -u0_5[l][m]/r[l][m]*v_r[l][m])           / dr_l))
             * r[l][m];
 
-        // u6: H_phi vanishes at the inner wall (axial symmetry).
         f_.u_6[l][m] = 0.0;
 
-        // u7: H_z * r (axial flux).
         f_.u_7[l][m] =
             (0.25 * (u0_7[l+1][m]/r[l+1][m] + u0_7[l-1][m]/r[l-1][m]
                    + u0_7[l][m+1]/r[l][m+1]  + u0_7[l][m]/r[l][m])
@@ -400,7 +358,6 @@ void Solver::apply_bc_lower_outer() {
                       -u0_7[l][m]/r[l][m]*v_r[l][m])                   / dr_l))
             * r[l][m];
 
-        // u8: H_r vanishes at the inner wall.
         f_.u_8[l][m] = 0.0;
     }
 }

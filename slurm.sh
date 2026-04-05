@@ -28,7 +28,7 @@ echo "Date: $(date)"
 echo "======================"
 
 srun --mpi=pmix \
-     --cpus-per-task=${SLURM_CPUS_PER_TASK} \
+     --cpus-per-task="${SLURM_CPUS_PER_TASK}" \
      --cpu-bind=verbose,cores \
      ./build/mpd-plasma-dynamics "${CONFIG_FILE}"
 

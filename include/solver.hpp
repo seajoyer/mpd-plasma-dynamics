@@ -35,25 +35,23 @@ private:
     const Grid&       grid_;
     Fields&           f_;
 
-    // ---- MPI scratch buffers for m-direction (column) ghost exchange ----
-    // Rows in the l-direction are contiguous and exchanged directly from the
-    // array without intermediate copies.
-    std::vector<double> col_sl_, col_sr_, col_rl_, col_rr_;
+    // ---- MPI scratch buffer for the batched ghost exchange -----------------
+    // Holds packed column data for all 18 arrays × 4 directions.
+    // Layout: [ send_lo | send_hi | recv_lo | recv_hi ] × nfields,
+    // each segment being local_L_with_ghosts doubles.
+    // Resized once on the first call; reused every subsequent step.
+    std::vector<double> col_batch_buf_;
 
     // ---- sub-steps ----
 
     /// Exchange ghost cells for all 18 arrays (8 conservative + 10 physical)
-    /// in all four Cartesian directions.
+    /// in a single non-blocking MPI round (one Waitall for everything).
     void exchange_all_ghosts();
 
     /// Lax–Friedrichs update for interior cells.
-    /// l ∈ [1..local_L],  m ∈ [m_lo..m_hi] where m_lo/m_hi skip wall cells
-    /// owned by this rank.
     void compute_central_update();
 
     /// Reconstruct physical vars from u for the central interior.
-    /// Called after compute_central_update so BC routines see up-to-date
-    /// neighbour values.
     void update_central_physical();
 
     // ---- boundary conditions ----

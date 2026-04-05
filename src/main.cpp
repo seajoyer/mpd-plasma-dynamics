@@ -24,6 +24,16 @@ int main(int argc, char* argv[]) {
     // MPIManager initialises MPI and builds the 2-D Cartesian topology.
     MPIManager mpi(argc, argv, cfg);
 
+    // When stdout is redirected to a file (as SLURM always does) the C
+    // runtime switches from line-buffered to fully-buffered mode.  Every
+    // printf then silently accumulates in a kernel buffer and only appears
+    // in the log once that buffer fills up — producing multi-minute latency
+    // and burst prints.  Setting unbuffered mode on rank 0 fixes this with
+    // negligible overhead because rank 0 only emits infrequent diagnostic
+    // lines.
+    if (mpi.rank == 0)
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     if (mpi.rank == 0) {
         std::printf("Config file         : %s\n", config_path);
         std::printf("Grid                : %d x %d  (L x M)\n",
@@ -121,9 +131,11 @@ int main(int argc, char* argv[]) {
             const double change = Diagnostics::solution_change(
                 fields, mpi.local_L, mpi.local_M);
 
-            if (mpi.rank == 0)
+            if (mpi.rank == 0) {
                 std::printf("Step %d, t=%.6f, relative change: %.6e\n",
                             step_count, t, change);
+                // No explicit fflush needed — stdout is now unbuffered.
+            }
 
             if (change < cfg.convergence_threshold) {
                 converged = true;
@@ -165,6 +177,7 @@ int main(int argc, char* argv[]) {
                             t,
                             global_vals[0], global_vals[1], global_vals[2],
                             global_vals[3], global_vals[4]);
+                // stdout is unbuffered, so this appears in the log immediately.
             }
         }
     }
