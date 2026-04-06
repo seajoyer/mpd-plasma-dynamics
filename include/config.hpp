@@ -29,9 +29,9 @@ struct GeometryConfig {
 ///   global_lo < 0  →  0                    (first cell on the face)
 ///   global_hi < 0  →  L_max_global-1 or M_max  (last cell on the face)
 ///
-/// Example (m_lo face, L_end = 320, L_max = 800):
+/// Example (m_lo face, two segments splitting at l = 320):
 ///
-///   { global_lo =   0, global_hi = 320, type = "solid_wall" }
+///   { global_lo =   0, global_hi = 320, type = "solid_wall"    }
 ///   { global_lo = 321, global_hi =  -1, type = "axis_symmetry" }
 struct BCSegmentConfig {
     int         global_lo    = -1;   ///< negative → face start
@@ -72,7 +72,6 @@ struct SimConfig {
 
     // ---- global grid ----
     int L_max_global = 800;
-    int L_end        = 320;   ///< axial index where inner-wall BC switches regime
     int M_max        = 400;
 
     // ---- convergence ----

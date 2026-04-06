@@ -123,7 +123,6 @@ void SimConfig::load(const std::string& path) {
     // ---- grid --------------------------------------------------------------
     if (auto n = cfg["grid"]) {
         if (n["L_max_global"]) L_max_global = n["L_max_global"].as<int>();
-        if (n["L_end"])        L_end        = n["L_end"]       .as<int>();
         if (n["M_max"])        M_max        = n["M_max"]       .as<int>();
     }
 

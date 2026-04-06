@@ -4,20 +4,15 @@ physics:
   H_z0:  0.25
 
 time:
-  T:  5.0
-  dt: 0.000020   # initial dt; also the fixed dt when adaptive_dt.enabled = false
+  T:  3.0
+  dt: 0.00002
 
 adaptive_dt:
   enabled:       false
   cfl_number:    0.45
   growth_factor: 1.10
   dt_min:        1.0e-9
-  dt_max:        1.0e-3
-
-grid:
-  L_max_global: 800
-  L_end:        320
-  M_max:        400
+  dt_max:        1.0e-5
 
 convergence:
   threshold:       0.0
@@ -31,7 +26,11 @@ output:
 parallel:
   openmp_threads: 0
   mpi_dims_l: 0
-  mpi_dims_m: 1
+  mpi_dims_m: 0
+
+grid:
+  L_max_global: 800
+  M_max:        400
 
 # ── Geometry ────────────────────────────────────────────────────────────────
 # `type` must match a name registered in register_all_geometries().
@@ -81,10 +80,11 @@ boundary_conditions:
     - type: outer_wall
 
   # Inner boundary — two segments covering different axial regions:
-  #   [0, 320]   solid nozzle / electrode wall
-  #   [321, end] open axis of symmetry (after the nozzle throat)
+  #   [0, 320]   solid nozzle / electrode wall  (up to and including the throat)
+  #   [321, end] open axis of symmetry          (downstream of the nozzle)
   #
-  # The sentinel -1 in the second segment's range means "to the end of the face".
+  # Adjust the split index here to move the nozzle/axis transition without
+  # touching any C++ source.  Use -1 as a sentinel for "to the end of the face".
   m_lo:
     - range: [0, 320]
       type: solid_wall
