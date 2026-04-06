@@ -36,7 +36,8 @@ add_executable(${PROJECT_NAME}
     src/bcs/axis_symmetry_bc.cpp
 
     # Built-in geometry implementations
-    src/geometries/coaxial_nozzle.cpp
+    src/geometries/short_cathode_parabolic.cpp
+    src/geometries/short_cathode_cosine.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE src include)

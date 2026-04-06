@@ -37,10 +37,11 @@ grid:
 # The optional `params` sub-node is forwarded to the geometry constructor.
 #
 # Built-in types:
-#   coaxial_nozzle  – original hard-coded nozzle profile (no params required)
+#   short_cathode_parabolic
+#   short_cathode_cosine
 #
 geometry:
-  type: coaxial_nozzle
+  type: short_cathode_cosine
 
 # ── Boundary conditions ─────────────────────────────────────────────────────
 #
@@ -86,9 +87,9 @@ boundary_conditions:
   # Adjust the split index here to move the nozzle/axis transition without
   # touching any C++ source.  Use -1 as a sentinel for "to the end of the face".
   m_lo:
-    - range: [0, 320]
+    - range: [0, 260]
       type: solid_wall
-    - range: [321, -1]
+    - range: [261, -1]
       type: axis_symmetry
 
 # ── Example: custom inlet strip ─────────────────────────────────────────────

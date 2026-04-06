@@ -3,7 +3,8 @@
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
 
-#include "geometries/coaxial_nozzle.hpp"
+#include "geometries/short_cathode_cosine.hpp"
+#include "geometries/short_cathode_parabolic.hpp"
 
 // ============================================================
 // GeometryRegistry singleton
@@ -34,8 +35,12 @@ GeometryRegistry::create(const std::string& type, const YAML::Node& params) cons
 void register_all_geometries() {
     GeometryRegistry& reg = GeometryRegistry::instance();
 
-    reg.register_geometry("coaxial_nozzle", [](const YAML::Node& p) {
-        return std::make_unique<CoaxialNozzleGeometry>(p);
+    reg.register_geometry("short_cathode_parabolic", [](const YAML::Node& p) {
+        return std::make_unique<ShortCathodeParabolicGeometry>(p);
+    });
+
+    reg.register_geometry("short_cathode_cosine", [](const YAML::Node& p) {
+        return std::make_unique<ShortCathodeCosineGeometry>(p);
     });
 
     // ----------------------------------------------------------------

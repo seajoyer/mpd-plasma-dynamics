@@ -14,14 +14,14 @@ namespace YAML { class Node; }
 ///
 /// The params YAML node is currently unused (geometry is fixed), but is
 /// accepted for API consistency; future versions may add r_outer, throat_z, etc.
-class CoaxialNozzleGeometry : public IGeometry {
+class ShortCathodeParabolicGeometry : public IGeometry {
 public:
-    explicit CoaxialNozzleGeometry(const YAML::Node& /*params*/) {}
+    explicit ShortCathodeParabolicGeometry(const YAML::Node& /*params*/) {}
 
     double r_inner    (double z) const override;
     double r_outer    (double z) const override;
     double dr_inner_dz(double z) const override;
     double dr_outer_dz(double z) const override;
 
-    std::string name() const override { return "coaxial_nozzle"; }
+    std::string name() const override { return "short_cathode_parabolic"; }
 };
