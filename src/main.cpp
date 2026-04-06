@@ -1,36 +1,37 @@
 #include <cstdlib>
 #include <cstdio>
 #include <omp.h>
+#include <yaml-cpp/yaml.h>
 
+#include "bc_registry.hpp"
 #include "config.hpp"
-#include "mpi_manager.hpp"
-#include "grid.hpp"
-#include "fields.hpp"
-#include "solver.hpp"
 #include "diagnostics.hpp"
+#include "fields.hpp"
+#include "grid.hpp"
 #include "io_manager.hpp"
+#include "mpi_manager.hpp"
+#include "solver.hpp"
 
 int main(int argc, char* argv[]) {
 
     // ----------------------------------------------------------------
-    // 1. Configuration
+    // 1. Register all built-in geometry and BC types.
+    //    Must happen before SimConfig::load() tries to validate names
+    //    or Solver constructs its FaceBC objects.
     // ----------------------------------------------------------------
+    register_all_geometries();
+    register_all_bcs();
 
+    // ----------------------------------------------------------------
+    // 2. Configuration
+    // ----------------------------------------------------------------
     const char* config_path = (argc > 1) ? argv[1] : "config.yaml";
 
     SimConfig cfg;
     cfg.load(config_path);
 
-    // MPIManager initialises MPI and builds the 2-D Cartesian topology.
     MPIManager mpi(argc, argv, cfg);
 
-    // When stdout is redirected to a file (as SLURM always does) the C
-    // runtime switches from line-buffered to fully-buffered mode.  Every
-    // printf then silently accumulates in a kernel buffer and only appears
-    // in the log once that buffer fills up — producing multi-minute latency
-    // and burst prints.  Setting unbuffered mode on rank 0 fixes this with
-    // negligible overhead because rank 0 only emits infrequent diagnostic
-    // lines.
     if (mpi.rank == 0)
         std::setvbuf(stdout, nullptr, _IONBF, 0);
 
@@ -41,6 +42,7 @@ int main(int argc, char* argv[]) {
         std::printf("Initial dt / T end  : %.6e / %.4f\n", cfg.dt, cfg.T);
         std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n",
                     mpi.size, mpi.dims[0], mpi.dims[1]);
+        std::printf("Geometry            : %s\n", cfg.geometry.type.c_str());
 
         if (cfg.adaptive_dt) {
             std::printf("Adaptive dt         : ON  (CFL=%.2f, growth=%.2f, "
@@ -63,12 +65,21 @@ int main(int argc, char* argv[]) {
         omp_set_num_threads(cfg.openmp_threads);
 
     // ----------------------------------------------------------------
-    // 2. Build grid and initialise fields
+    // 3. Build geometry (owned in main; outlives Grid)
     // ----------------------------------------------------------------
+    YAML::Node geom_params;
+    if (!cfg.geometry.params_yaml.empty())
+        geom_params = YAML::Load(cfg.geometry.params_yaml);
 
+    auto geometry = GeometryRegistry::instance().create(cfg.geometry.type, geom_params);
+
+    // ----------------------------------------------------------------
+    // 4. Build grid and initialise fields
+    // ----------------------------------------------------------------
     Grid grid(cfg,
               mpi.local_L_with_ghosts, mpi.l_start,
-              mpi.local_M_with_ghosts, mpi.m_start);
+              mpi.local_M_with_ghosts, mpi.m_start,
+              *geometry);
 
     Fields fields(mpi.local_L_with_ghosts, mpi.local_M_with_ghosts,
                   cfg.convergence_threshold > 0.0);
@@ -80,25 +91,19 @@ int main(int argc, char* argv[]) {
         fields.save_prev();
 
     // ----------------------------------------------------------------
-    // 3. Construct solver and I/O manager
+    // 5. Construct solver and I/O manager
     // ----------------------------------------------------------------
-
     Solver    solver(cfg, mpi, grid, fields);
     IOManager io    (cfg, mpi);
 
     // ----------------------------------------------------------------
-    // 4. Time loop
+    // 6. Time loop
     // ----------------------------------------------------------------
-
     double t          = 0.0;
     int    step_count = 0;
     bool   converged  = false;
+    double dt         = cfg.dt;
 
-    // dt for the upcoming step.  Initialised from config; updated each step
-    // when adaptive_dt is enabled.
-    double dt = cfg.dt;
-
-    // Periodic console checkpoint: probe cell at global (l=20, m=40).
     constexpr int check_l_global = 20;
     constexpr int check_m_global = 40;
 
@@ -120,42 +125,30 @@ int main(int argc, char* argv[]) {
                     "--------------");
     }
 
-    // Write step 0 before the loop starts.
     if (cfg.vtk_step > 0)
         io.write_frame(0, fields, grid);
 
     const double begin = mpi.wtime();
 
     while (t < cfg.T && !converged) {
-
-        // Clamp dt so we land exactly on T without overshooting.
         if (t + dt > cfg.T)
             dt = cfg.T - t;
 
         solver.advance(dt);
-        t          += dt;
+        t += dt;
         ++step_count;
 
-        // ---- adaptive dt: recompute from updated fields ------------------
-        // We compute the new dt *after* the step so we can use the freshly
-        // updated wave speeds.  The growth-rate cap in compute_dt() prevents
-        // the step from jumping too far if the wave speed dropped sharply.
-        if (cfg.adaptive_dt) {
+        if (cfg.adaptive_dt)
             dt = Diagnostics::compute_dt(fields, cfg,
                                          mpi.local_L, mpi.local_M, mpi, dt);
-        }
 
-        // ---- convergence check -------------------------------------------
         if (cfg.convergence_threshold > 0.0
                 && step_count % cfg.check_frequency == 0) {
-
             const double change = Diagnostics::solution_change(
                 fields, mpi.local_L, mpi.local_M);
-
             if (mpi.rank == 0)
                 std::printf("Step %d, t=%.6f, dt=%.6e, relative change: %.6e\n",
                             step_count, t, dt, change);
-
             if (change < cfg.convergence_threshold) {
                 converged = true;
                 if (mpi.rank == 0)
@@ -165,18 +158,13 @@ int main(int argc, char* argv[]) {
             fields.save_prev();
         }
 
-        // ---- CFL sanity check every 100 steps ----------------------------
-        // With adaptive_dt this should never fire; it acts as a safety net.
         if (step_count % 100 == 0)
             Diagnostics::check_cfl(fields, cfg, mpi,
-                                   mpi.local_L, mpi.local_M,
-                                   dt, step_count);
+                                   mpi.local_L, mpi.local_M, dt, step_count);
 
-        // ---- VTK animation frame ----------------------------------------
         if (cfg.vtk_step > 0 && step_count % cfg.vtk_step == 0)
             io.write_frame(step_count, fields, grid);
 
-        // ---- periodic console checkpoint --------------------------------
         if (step_count % 1000 == 0) {
             double local_vals[5] = {0, 0, 0, 0, 0};
             if (owns_checkpoint) {
@@ -189,7 +177,6 @@ int main(int argc, char* argv[]) {
             double global_vals[5];
             MPI_Reduce(local_vals, global_vals, 5, MPI_DOUBLE, MPI_SUM,
                        0, MPI_COMM_WORLD);
-
             if (mpi.rank == 0) {
                 std::printf("%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
                             t, dt,
@@ -203,9 +190,6 @@ int main(int argc, char* argv[]) {
         std::printf("\nCalculation time : %.3f sec  (%d steps)\n",
                     mpi.wtime() - begin, step_count);
 
-    // ----------------------------------------------------------------
-    // 5. Write final VTK frame (always, regardless of vtk_step)
-    // ----------------------------------------------------------------
     io.write_frame(step_count, fields, grid);
 
     if (mpi.rank == 0)

@@ -4,17 +4,15 @@ project(mpd-plasma-dynamics LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
 set(FETCHCONTENT_QUIET ON)
 set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE ALWAYS)
 
 include(FetchContent)
-
 include(cmake/Dependencies.cmake)
 
 add_executable(${PROJECT_NAME}
+    # Core
     src/main.cpp
     src/array2d.cpp
     src/config.cpp
@@ -24,6 +22,21 @@ add_executable(${PROJECT_NAME}
     src/diagnostics.cpp
     src/io_manager.cpp
     src/solver.cpp
+
+    # BC + geometry framework
+    src/face_bc.cpp
+    src/bc_registry.cpp
+    src/geometry_registry.cpp
+
+    # Built-in BC implementations
+    src/bcs/inflow_bc.cpp
+    src/bcs/outflow_bc.cpp
+    src/bcs/outer_wall_bc.cpp
+    src/bcs/solid_wall_bc.cpp
+    src/bcs/axis_symmetry_bc.cpp
+
+    # Built-in geometry implementations
+    src/geometries/coaxial_nozzle.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE src include)
@@ -33,7 +46,6 @@ target_link_libraries(${PROJECT_NAME}
         MPI::MPI_CXX
         OpenMP::OpenMP_CXX
         yaml-cpp::yaml-cpp
-
         VTK::IOLegacy
 )
 

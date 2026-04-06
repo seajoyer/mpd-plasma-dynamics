@@ -1,6 +1,53 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
+// ============================================================
+// Geometry configuration
+// ============================================================
+
+/// Runtime configuration for the channel geometry.
+/// `type`        maps to a name registered in GeometryRegistry.
+/// `params_yaml` holds the raw YAML text of the optional `params` sub-node,
+///               which is parsed and forwarded to the geometry factory.
+struct GeometryConfig {
+    std::string type        = "coaxial_nozzle";
+    std::string params_yaml;   ///< empty → no params; factory receives a null node
+};
+
+// ============================================================
+// Boundary-condition configuration
+// ============================================================
+
+/// Configuration for one contiguous segment of a face.
+///
+/// global_lo / global_hi are indices along the face's *free* axis in global
+/// coordinates (l for M faces, m for L faces).  A negative value is a
+/// sentinel meaning "use the face's natural start/end":
+///
+///   global_lo < 0  →  0                    (first cell on the face)
+///   global_hi < 0  →  L_max_global-1 or M_max  (last cell on the face)
+///
+/// Example (m_lo face, L_end = 320, L_max = 800):
+///
+///   { global_lo =   0, global_hi = 320, type = "solid_wall" }
+///   { global_lo = 321, global_hi =  -1, type = "axis_symmetry" }
+struct BCSegmentConfig {
+    int         global_lo    = -1;   ///< negative → face start
+    int         global_hi    = -1;   ///< negative → face end
+    std::string type;
+    std::string params_yaml;         ///< serialised YAML for BC-specific params
+};
+
+/// All segments for one face (l_lo, l_hi, m_lo, or m_hi).
+struct BCFaceConfig {
+    std::vector<BCSegmentConfig> segments;
+};
+
+// ============================================================
+// SimConfig
+// ============================================================
 
 /// All tuneable parameters for the MHD simulation.
 ///
@@ -17,27 +64,11 @@ struct SimConfig {
     double dt = 0.000025;   ///< initial (and fixed) time step when adaptive_dt = false
 
     // ---- adaptive time step -----------------------------------------------
-    /// Enable CFL-driven adaptive time stepping.
-    /// When true, dt is recomputed after every step from the current wave
-    /// speeds.  The value of `dt` above is used only as the starting step.
     bool   adaptive_dt      = false;
-
-    /// Target CFL number.  Must be in (0, 1).  Typical value: 0.5.
     double cfl_number       = 0.5;
-
-    /// Maximum factor by which dt may grow between consecutive steps.
-    /// Prevents runaway growth when the wave speed drops suddenly.
-    /// Typical value: 1.1 (allow at most 10 % growth per step).
     double dt_growth_factor = 1.1;
-
-    /// Hard lower bound on dt (guards against stiff wave-speed spikes
-    /// that would reduce dt to near zero and stall the simulation).
-    double dt_min = 1.0e-9;
-
-    /// Hard upper bound on dt (prevents dt from growing beyond what the
-    /// physics or output schedule can tolerate).
-    double dt_max = 1.0e-3;
-    // -----------------------------------------------------------------------
+    double dt_min           = 1.0e-9;
+    double dt_max           = 1.0e-3;
 
     // ---- global grid ----
     int L_max_global = 800;
@@ -49,30 +80,33 @@ struct SimConfig {
     int    check_frequency       = 100;
 
     // ---- output ----
-    std::string output_dir = "output";  ///< top-level directory for all runs
-    std::string run_name   = "run";     ///< prefix of the per-run sub-directory
-    int         vtk_step   = 100;       ///< write VTK frame every N steps (0 → final only)
+    std::string output_dir = "output";
+    std::string run_name   = "run";
+    int         vtk_step   = 100;
 
     // ---- parallelism ----
-    int openmp_threads = 0;   ///< 0 → defer to OMP_NUM_THREADS env var
+    int openmp_threads = 0;
+    int mpi_dims_l     = 0;
+    int mpi_dims_m     = 0;
 
-    /// MPI Cartesian decomposition hints.
-    /// 0 means "let MPI_Dims_create decide".
-    int mpi_dims_l = 0;   ///< 0 = auto
-    int mpi_dims_m = 0;   ///< 0 = auto; set to 1 for pure-MPI runs
+    // ---- geometry ----
+    GeometryConfig geometry;
+
+    // ---- boundary conditions (one BCFaceConfig per Cartesian face) ----
+    BCFaceConfig bc_l_lo;   ///< z = 0  face (inflow by default)
+    BCFaceConfig bc_l_hi;   ///< z = L  face (outflow by default)
+    BCFaceConfig bc_m_lo;   ///< r = inner face (solid_wall + axis_symmetry by default)
+    BCFaceConfig bc_m_hi;   ///< r = outer face (outer_wall by default)
 
     // ---- derived (computed by load / init) ----
     double dz{};
     double dy{};
 
-    /// Ensure dz and dy are consistent with the default grid parameters.
     SimConfig() { init(); }
 
     /// Load all parameters from a YAML file and compute derived quantities.
-    /// @param path  path to the YAML config file (default: "config.yaml")
     void load(const std::string& path = "config.yaml");
 
 private:
-    /// Compute dz and dy from the primary grid parameters.
     void init();
 };

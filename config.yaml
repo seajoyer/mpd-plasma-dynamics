@@ -7,20 +7,12 @@ time:
   T:  5.0
   dt: 0.000020   # initial dt; also the fixed dt when adaptive_dt.enabled = false
 
-# ── Adaptive time stepping ──────────────────────────────────────────────────
-# When enabled, dt is recomputed after every step to keep the simulation at
-# the target CFL number.  The `dt` above is only used as the starting step.
-#
-# Recommended workflow:
-#   1. Run once with adaptive_dt.enabled: false to get a baseline.
-#   2. Enable adaptive_dt and set cfl_number ≤ 0.5 for stability.
-#   3. Tighten dt_min / dt_max if the wave speed varies widely.
 adaptive_dt:
-  enabled:       false   # set to true to activate CFL-driven stepping
-  cfl_number:    0.45    # target CFL (< 0.5 for Lax–Friedrichs stability)
-  growth_factor: 1.10    # max dt growth factor per step (e.g. 1.10 = +10 %)
-  dt_min:        1.0e-9  # hard lower bound (prevents stall on wave-speed spike)
-  dt_max:        1.0e-3  # hard upper bound
+  enabled:       false
+  cfl_number:    0.45
+  growth_factor: 1.10
+  dt_min:        1.0e-9
+  dt_max:        1.0e-3
 
 grid:
   L_max_global: 800
@@ -37,17 +29,80 @@ output:
   vtk_step:  5000
 
 parallel:
-  openmp_threads: 0   # 0 = defer to OMP_NUM_THREADS
-
-  # MPI Cartesian decomposition.
-  # 0 means "let MPI_Dims_create choose automatically".
-  #
-  # Pure-MPI benchmark (--cpus-per-task=1, all ranks on one axis):
-  #   mpi_dims_l: 0   # fills with total rank count
-  #   mpi_dims_m: 1   # 1-D decomposition: no column packing, wider inner loop
-  #
-  # Hybrid MPI+OpenMP (e.g. 12 MPI × 4 OMP):
-  #   mpi_dims_l: 0   # auto
-  #   mpi_dims_m: 0   # auto 2-D split; OpenMP covers M within each rank
+  openmp_threads: 0
   mpi_dims_l: 0
-  mpi_dims_m: 1   # set to 1 for pure-MPI runs; 0 for hybrid MPI+OMP
+  mpi_dims_m: 1
+
+# ── Geometry ────────────────────────────────────────────────────────────────
+# `type` must match a name registered in register_all_geometries().
+# The optional `params` sub-node is forwarded to the geometry constructor.
+#
+# Built-in types:
+#   coaxial_nozzle  – original hard-coded nozzle profile (no params required)
+#
+geometry:
+  type: coaxial_nozzle
+
+# ── Boundary conditions ─────────────────────────────────────────────────────
+#
+# Each face (l_lo, l_hi, m_lo, m_hi) holds a list of segments.
+# Segments are applied in order; together they should cover the full face.
+#
+# Segment fields:
+#   type       (required)  – name registered in register_all_bcs()
+#   range      (optional)  – [global_lo, global_hi] along the free axis
+#                            negative value = sentinel for face start/end
+#                            omit entirely  = full face (same as [-1, -1])
+#   params     (optional)  – BC-specific parameters forwarded to constructor
+#
+# Free-axis convention:
+#   l_lo / l_hi faces  →  free axis is m  (range values are global m indices)
+#   m_lo / m_hi faces  →  free axis is l  (range values are global l indices)
+#
+# Built-in BC types:
+#   inflow         – L_LO  – prescribed inflow; v_z matched from interior
+#   outflow        – L_HI  – zero-gradient (copies u from last interior cell)
+#   outer_wall     – M_HI  – wall-tangent condition
+#   solid_wall     – M_LO  – wall-tangent condition (nozzle / electrode)
+#   axis_symmetry  – M_LO  – one-sided Lax-Friedrichs with symmetry constraints
+#
+boundary_conditions:
+
+  # Inflow at z = 0 — single segment, covers the full face.
+  l_lo:
+    - type: inflow
+
+  # Outflow at z = L — single segment, covers the full face.
+  l_hi:
+    - type: outflow
+
+  # Outer wall — single segment, covers the full face.
+  m_hi:
+    - type: outer_wall
+
+  # Inner boundary — two segments covering different axial regions:
+  #   [0, 320]   solid nozzle / electrode wall
+  #   [321, end] open axis of symmetry (after the nozzle throat)
+  #
+  # The sentinel -1 in the second segment's range means "to the end of the face".
+  m_lo:
+    - range: [0, 320]
+      type: solid_wall
+    - range: [321, -1]
+      type: axis_symmetry
+
+# ── Example: custom inlet strip ─────────────────────────────────────────────
+# To replace part of the inflow face with a different BC, split l_lo into
+# multiple segments.  Example (not active — uncomment to test):
+#
+# boundary_conditions:
+#   l_lo:
+#     - range: [-1, 99]         # m = 0..99  — normal inflow
+#       type: inflow
+#     - range: [100, 200]       # m = 100..200 — custom prescribed inlet
+#       type: my_inlet
+#       params:
+#         v_z: 0.30
+#         rho: 1.2
+#     - range: [201, -1]        # m = 201..end — normal inflow
+#       type: inflow
