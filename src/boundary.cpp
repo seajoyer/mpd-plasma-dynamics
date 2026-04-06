@@ -76,11 +76,11 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         #pragma omp parallel for
         for (int m = 0; m < M_max + 1; m++) {
             fields.rho[0][m] = fields.rho[1][m];
-            fields.v_z[0][m] = -fields.v_z[2][m];  // Reflect v_z (normal component)
+            fields.v_z[0][m] = fields.v_z[1][m];  
             fields.v_r[0][m] = fields.v_r[1][m];   // Extrapolate v_r (tangential)
             fields.v_phi[0][m] = fields.v_phi[1][m]; // Extrapolate v_phi (tangential)
             fields.H_phi[0][m] = fields.H_phi[1][m];
-            fields.H_z[0][m] = -fields.H_z[2][m];  // Reflect H_z (normal component)
+            fields.H_z[0][m] = fields.H_z[1][m];  
             fields.H_r[0][m] = fields.H_r[1][m];
             fields.e[0][m] = fields.e[1][m];
             
@@ -129,7 +129,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         int l_global = domain.l_start + l - 1;
         
         // Only apply to cells before the step transition starts
-        if (l_global >= 1 && l_global < l_step_start) {
+        if (l_global >= 1 && l_global < l_step_start + 1) {
             // Non-leakage (slip wall) condition from boundary-pure.cpp
             fields.rho[l][0] = fields.rho[l][1];
             fields.v_z[l][0] = fields.v_z[l][1];
@@ -160,7 +160,7 @@ void ApplyBoundaryConditions(PhysicalFields& fields, ConservativeVars& u,
         int l_global = domain.l_start + l - 1;
         
         // Only apply condition at the step transition region (RED zone)
-        if (l_global >= l_step_start && l_global <= l_step_end) {
+        if (l_global >= l_step_start + 1 && l_global <= l_step_end) {
             
             // We apply the condition ONLY to the surface (m = 0)
             const int m = 0;

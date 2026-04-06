@@ -28,7 +28,7 @@ auto main(int argc, char* argv[]) -> int {
     SimulationParams params;
     params.gamma = 1.67;
     params.beta = 0.05;
-    params.H_z0 = 0.25;
+    params.H_z0 = 0.0;
     params.animate = 0;
     params.animation_frequency = 50000;
     params.output_format = "vtk";

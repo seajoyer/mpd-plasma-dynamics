@@ -2,7 +2,7 @@
 #SBATCH --job-name=mpd-plasma-hybrid
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=48
 #SBATCH --time=12:00:00
 #SBATCH --mem=10G
 #SBATCH --output=log/mpd-plasma-%j.out
