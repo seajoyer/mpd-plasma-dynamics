@@ -5,14 +5,8 @@
 #include <string>
 #include <unordered_map>
 
-// Forward declarations to avoid including heavy yaml-cpp here.
 namespace YAML { class Node; }
 class IBoundaryCondition;
-class IGeometry;
-
-// ============================================================
-// BCRegistry
-// ============================================================
 
 /// Singleton factory registry for IBoundaryCondition implementations.
 ///
@@ -36,36 +30,5 @@ private:
     std::unordered_map<std::string, Factory> factories_;
 };
 
-// ============================================================
-// GeometryRegistry
-// ============================================================
-
-/// Singleton factory registry for IGeometry implementations.
-///
-/// Populated at startup by register_all_geometries() (see src/geometry_registry.cpp).
-class GeometryRegistry {
-public:
-    using Factory = std::function<std::unique_ptr<IGeometry>(const YAML::Node&)>;
-
-    static GeometryRegistry& instance();
-
-    void register_geometry(std::string name, Factory factory);
-
-    /// Throws std::runtime_error if `type` is unknown.
-    std::unique_ptr<IGeometry> create(const std::string& type,
-                                       const YAML::Node& params) const;
-
-private:
-    GeometryRegistry() = default;
-    std::unordered_map<std::string, Factory> factories_;
-};
-
-// ============================================================
-// Startup registration functions
-// ============================================================
-
 /// Register every built-in BC type.  Call once before constructing any Solver.
 void register_all_bcs();
-
-/// Register every built-in geometry type.  Call once before constructing any Grid.
-void register_all_geometries();

@@ -1,4 +1,4 @@
-#include "bc_registry.hpp"
+#include "geometry_registry.hpp"
 
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
@@ -22,7 +22,8 @@ std::unique_ptr<IGeometry>
 GeometryRegistry::create(const std::string& type, const YAML::Node& params) const {
     auto it = factories_.find(type);
     if (it == factories_.end())
-        throw std::runtime_error("GeometryRegistry: unknown geometry type '" + type + "'");
+        throw std::runtime_error("GeometryRegistry: unknown geometry type '" + type + "'.\n"
+            "  Did you forget to call register_all_geometries(), or mistype the name in config.yaml?");
     return it->second(params);
 }
 

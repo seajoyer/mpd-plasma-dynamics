@@ -4,6 +4,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "bc_registry.hpp"
+#include "geometry_registry.hpp"
 #include "config.hpp"
 #include "diagnostics.hpp"
 #include "fields.hpp"

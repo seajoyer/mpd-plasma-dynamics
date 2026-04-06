@@ -27,14 +27,24 @@ void Solver::advance(double dt) {
     compute_central_update();
     update_central_physical();
 
-    // Apply BCs in a deterministic order:
-    //   L_LO before M_LO so that the inflow corner cell (l=1,m=1) is set by
-    //   the inflow BC, then protected from overwrite by the corner policy in
-    //   FaceBC::apply() for M_LO.
+    // Apply BCs in the same order as the original monolithic solver:
+    //
+    //   1. l_lo (inflow)     — sets l=1 for all m
+    //   2. m_hi (outer wall) — sets m=local_M for all l; overwrites l=1 corner
+    //   3. m_lo (inner wall / axis) — sets m=1 for l=2..local_L-1
+    //                                 (corner policy excludes l=1 and l=local_L)
+    //   4. l_hi (outflow)    — sets l=local_L for all m; runs last so it owns
+    //                          both l=local_L corners (m=1 and m=local_M)
+    //
+    // This order preserves the corner ownership of the original solver:
+    //   (l=1,      m=1)       → inflow   (l_lo, protected by m_lo corner policy)
+    //   (l=1,      m=local_M) → outer_wall (m_hi overwriting l_lo)
+    //   (l=local_L, m=1)      → outflow  (l_hi overwriting m_lo)
+    //   (l=local_L, m=local_M)→ outflow  (l_hi overwriting m_hi)
     bc_l_lo_.apply(f_, grid_, cfg_, mpi_, dt);
-    bc_l_hi_.apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_hi_.apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_lo_.apply(f_, grid_, cfg_, mpi_, dt);
+    bc_l_hi_.apply(f_, grid_, cfg_, mpi_, dt);
 
     // Full physical reconstruction: covers all cells (central + BC cells).
     f_.update_physical_from_u(grid_, cfg_, 1, mpi_.local_L, 1, mpi_.local_M);
