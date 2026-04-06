@@ -2,10 +2,9 @@
 
 #include <algorithm>
 #include <stdexcept>
-#include <yaml-cpp/yaml.h>
 
 #include "bc_context.hpp"
-#include "bc_registry.hpp"
+#include "bcs/per_field_bc.hpp"
 #include "config.hpp"
 #include "fields.hpp"
 #include "grid.hpp"
@@ -24,7 +23,6 @@ FaceBC::FaceBC(Face face, std::vector<BCSegment> segments)
 // ============================================================
 
 FaceBC FaceBC::from_config(Face face, const BCFaceConfig& face_cfg) {
-    BCRegistry& reg = BCRegistry::instance();
     std::vector<BCSegment> segs;
     segs.reserve(face_cfg.segments.size());
 
@@ -32,13 +30,7 @@ FaceBC FaceBC::from_config(Face face, const BCFaceConfig& face_cfg) {
         BCSegment seg;
         seg.global_lo = sc.global_lo;
         seg.global_hi = sc.global_hi;
-
-        // Parse the per-segment params YAML (may be an empty string → null node).
-        YAML::Node params;
-        if (!sc.params_yaml.empty())
-            params = YAML::Load(sc.params_yaml);
-
-        seg.bc = reg.create(sc.type, params);
+        seg.bc        = std::make_unique<PerFieldBC>(face, sc);
         segs.push_back(std::move(seg));
     }
 
@@ -59,11 +51,6 @@ bool FaceBC::owns_face(const MPIManager& mpi) const noexcept {
     return false;
 }
 
-// Returns the full [lo, hi] range (inclusive) of the face's *free* axis in
-// global coordinates.
-//
-//   L_LO / L_HI : free axis = m,  range = [0, M_max]
-//   M_LO / M_HI : free axis = l,  range = [0, L_max_global - 1]
 std::pair<int,int>
 FaceBC::face_global_range(const SimConfig& cfg) const noexcept {
     switch (face_) {
@@ -77,13 +64,6 @@ FaceBC::face_global_range(const SimConfig& cfg) const noexcept {
     return { 0, 0 };
 }
 
-// Clip the global segment [g_lo, g_hi] to what this rank owns, and convert
-// the result to local (1-based interior) indices.
-//
-// For L faces the rank owns m ∈ [m_start, m_end] → local m ∈ [1, local_M].
-// For M faces the rank owns l ∈ [l_start, l_end] → local l ∈ [1, local_L].
-//
-// Returns false when the intersection is empty (segment does not touch this rank).
 bool FaceBC::clip_to_local(int g_lo, int g_hi, const MPIManager& mpi,
                             int& local_lo, int& local_hi) const noexcept {
     int owned_global_lo, owned_global_hi;
@@ -107,10 +87,8 @@ bool FaceBC::clip_to_local(int g_lo, int g_hi, const MPIManager& mpi,
     const int clipped_hi = std::min(g_hi, owned_global_hi);
 
     if (clipped_lo > clipped_hi)
-        return false;   // empty intersection — this rank owns no cells in this segment
+        return false;
 
-    // Convert from global to local 1-based interior index:
-    //   local = global - owned_start + 1
     local_lo = clipped_lo - owned_global_lo + 1;
     local_hi = clipped_hi - owned_global_lo + 1;
     return true;
@@ -128,29 +106,20 @@ void FaceBC::apply(Fields& f, const Grid& g, const SimConfig& cfg,
     auto [face_lo, face_hi] = face_global_range(cfg);
 
     for (const BCSegment& seg : segments_) {
-        // Resolve negative sentinels to the real face bounds.
         const int g_lo = (seg.global_lo < 0) ? face_lo : seg.global_lo;
         const int g_hi = (seg.global_hi < 0) ? face_hi : seg.global_hi;
 
         int local_lo, local_hi;
         if (!clip_to_local(g_lo, g_hi, mpi, local_lo, local_hi))
-            continue;   // this rank owns no cells from this segment
+            continue;
 
-        // Corner policy for M_LO face:
-        //
-        // The L_LO face (InflowBC) owns the corner cell (l=1, m=1) and sets
-        // it before any M_LO BC runs.  To avoid overwriting that, M_LO
-        // segments must not touch l=1 on l-lo boundary ranks.  We enforce
-        // this by clamping local_lo upward on those ranks.
-        //
-        // Similarly, the L_HI face owns (l=local_L, m=1) on the l-hi boundary.
+        // Corner policy for M_LO face (see Solver::advance() for ordering):
+        // l=1 corners are owned by the L_LO BC on l-lo boundary ranks.
+        // l=local_L corners are owned by the L_HI BC on l-hi boundary ranks.
         if (face_ == Face::M_LO) {
-            if (mpi.is_l_lo_boundary())
-                local_lo = std::max(local_lo, 2);
-            if (mpi.is_l_hi_boundary())
-                local_hi = std::min(local_hi, mpi.local_L - 1);
-            if (local_lo > local_hi)
-                continue;
+            if (mpi.is_l_lo_boundary()) local_lo = std::max(local_lo, 2);
+            if (mpi.is_l_hi_boundary()) local_hi = std::min(local_hi, mpi.local_L - 1);
+            if (local_lo > local_hi) continue;
         }
 
         BCContext ctx{ f, g, cfg, mpi, dt, local_lo, local_hi };

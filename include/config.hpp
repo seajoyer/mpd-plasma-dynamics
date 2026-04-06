@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "field_condition.hpp"
+
 // ============================================================
 // Geometry configuration
 // ============================================================
@@ -20,24 +22,56 @@ struct GeometryConfig {
 // Boundary-condition configuration
 // ============================================================
 
-/// Configuration for one contiguous segment of a face.
+/// Per-field boundary-condition specification for one contiguous segment of a face.
 ///
 /// global_lo / global_hi are indices along the face's *free* axis in global
 /// coordinates (l for M faces, m for L faces).  A negative value is a
 /// sentinel meaning "use the face's natural start/end":
 ///
-///   global_lo < 0  →  0                    (first cell on the face)
+///   global_lo < 0  →  0                        (first cell on the face)
 ///   global_hi < 0  →  L_max_global-1 or M_max  (last cell on the face)
 ///
-/// Example (m_lo face, two segments splitting at l = 320):
+/// Each physical field has an independent FieldCond.  Unspecified fields
+/// default to Neumann (zero-gradient).
 ///
-///   { global_lo =   0, global_hi = 320, type = "solid_wall"    }
-///   { global_lo = 321, global_hi =  -1, type = "axis_symmetry" }
+/// Example YAML for a solid inner wall:
+///
+///   m_lo:
+///     - range: [0, 260]
+///       rho:   neumann
+///       v_z:   neumann
+///       v_r:   wall_tangent
+///       v_phi: { dirichlet: 0.0 }
+///       e:     neumann
+///       H_z:   neumann
+///       H_r:   wall_tangent
+///       H_phi: neumann
+///
+/// Example YAML for the axis-of-symmetry region:
+///
+///   m_lo:
+///     - range: [261, -1]
+///       rho:   axis_lf
+///       v_z:   axis_lf
+///       v_r:   { dirichlet: 0.0 }
+///       v_phi: { dirichlet: 0.0 }
+///       e:     axis_lf
+///       H_z:   axis_lf
+///       H_r:   { dirichlet: 0.0 }
+///       H_phi: { dirichlet: 0.0 }
 struct BCSegmentConfig {
-    int         global_lo    = -1;   ///< negative → face start
-    int         global_hi    = -1;   ///< negative → face end
-    std::string type;
-    std::string params_yaml;         ///< serialised YAML for BC-specific params
+    int global_lo = -1;   ///< negative → face start
+    int global_hi = -1;   ///< negative → face end
+
+    // Per-field conditions — all default to Neumann.
+    FieldCond rho;
+    FieldCond v_z;
+    FieldCond v_r;
+    FieldCond v_phi;
+    FieldCond e;
+    FieldCond H_z;
+    FieldCond H_r;
+    FieldCond H_phi;
 };
 
 /// All segments for one face (l_lo, l_hi, m_lo, or m_hi).
@@ -94,8 +128,8 @@ struct SimConfig {
     // ---- boundary conditions (one BCFaceConfig per Cartesian face) ----
     BCFaceConfig bc_l_lo;   ///< z = 0  face (inflow by default)
     BCFaceConfig bc_l_hi;   ///< z = L  face (outflow by default)
-    BCFaceConfig bc_m_lo;   ///< r = inner face (solid_wall + axis_symmetry by default)
-    BCFaceConfig bc_m_hi;   ///< r = outer face (outer_wall by default)
+    BCFaceConfig bc_m_lo;   ///< r = inner face (wall + axis by default)
+    BCFaceConfig bc_m_hi;   ///< r = outer face (wall by default)
 
     // ---- derived (computed by load / init) ----
     double dz{};

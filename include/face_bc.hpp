@@ -6,23 +6,18 @@
 #include "iboundary_condition.hpp"
 
 struct BCFaceConfig;
+struct BCSegmentConfig;
 struct SimConfig;
 class Fields;
 class Grid;
 class MPIManager;
 
-/// One contiguous segment of a face, covered by a single IBoundaryCondition.
+/// One contiguous segment of a face covered by a single IBoundaryCondition.
 ///
 /// Global-index convention (free axis)
 /// ─────────────────────────────────────
 ///   global_lo < 0  →  treated as the first index of the face (0)
 ///   global_hi < 0  →  treated as the last  index of the face
-///
-/// Example for the m_lo face (free axis = global l):
-///
-///   global_lo = 0,   global_hi = 320   → solid-wall region
-///   global_lo = 321, global_hi = -1    → axis-of-symmetry (to end of domain)
-///   global_lo = -1,  global_hi = -1    → full face (no explicit range in YAML)
 struct BCSegment {
     int global_lo{-1};  ///< negative → face start
     int global_hi{-1};  ///< negative → face end
@@ -39,10 +34,10 @@ struct BCSegment {
 ///   3. Domain clipping  — intersects each segment's global range with the
 ///                         subset of the face that this rank owns, converting
 ///                         the result to local indices passed via BCContext.
-///   4. Corner policy    — for the M_LO face, the L_LO face (inflow) owns the
-///                         corner cell (l=1, m=1) on the l-lo boundary rank.
-///                         M_LO segments therefore start at l=2 on that rank,
-///                         matching the behaviour of the original solver.
+///   4. Corner policy    — for the M_LO face, l=1 corners are excluded on l-lo
+///                         boundary ranks and l=local_L corners are excluded on
+///                         l-hi boundary ranks; this matches the BC application
+///                         order in Solver::advance().
 ///
 /// Construction
 /// ─────────────
@@ -50,7 +45,8 @@ struct BCSegment {
 ///
 ///   auto bc = FaceBC::from_config(FaceBC::Face::M_LO, cfg.bc_m_lo);
 ///
-/// This calls BCRegistry to instantiate each segment's IBoundaryCondition.
+/// This creates a PerFieldBC for each segment directly from BCSegmentConfig,
+/// with no external registry lookup required.
 class FaceBC {
 public:
     enum class Face { L_LO, L_HI, M_LO, M_HI };
@@ -63,8 +59,7 @@ public:
     FaceBC(FaceBC&&)                 = default;
     FaceBC& operator=(FaceBC&&)      = default;
 
-    /// Build from config, using BCRegistry to create each segment's BC object.
-    /// Must be called after register_all_bcs().
+    /// Build from config, creating a PerFieldBC for each segment.
     static FaceBC from_config(Face face, const BCFaceConfig& face_cfg);
 
     /// Apply all segments to the appropriate cells on this rank.

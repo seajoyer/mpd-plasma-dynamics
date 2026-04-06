@@ -3,7 +3,6 @@
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 
-#include "bc_registry.hpp"
 #include "geometry_registry.hpp"
 #include "config.hpp"
 #include "diagnostics.hpp"
@@ -16,12 +15,11 @@
 int main(int argc, char* argv[]) {
 
     // ----------------------------------------------------------------
-    // 1. Register all built-in geometry and BC types.
+    // 1. Register all built-in geometry types.
     //    Must happen before SimConfig::load() tries to validate names
-    //    or Solver constructs its FaceBC objects.
+    //    or Grid is constructed.
     // ----------------------------------------------------------------
     register_all_geometries();
-    register_all_bcs();
 
     // ----------------------------------------------------------------
     // 2. Configuration
@@ -93,6 +91,9 @@ int main(int argc, char* argv[]) {
 
     // ----------------------------------------------------------------
     // 5. Construct solver and I/O manager
+    //    Solver::Solver() calls FaceBC::from_config() which creates
+    //    PerFieldBC objects directly from BCSegmentConfig — no external
+    //    BC registry is needed.
     // ----------------------------------------------------------------
     Solver    solver(cfg, mpi, grid, fields);
     IOManager io    (cfg, mpi);

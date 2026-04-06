@@ -25,15 +25,10 @@ add_executable(${PROJECT_NAME}
 
     # BC + geometry framework
     src/face_bc.cpp
-    src/bc_registry.cpp
     src/geometry_registry.cpp
 
-    # Built-in BC implementations
-    src/bcs/inflow_bc.cpp
-    src/bcs/outflow_bc.cpp
-    src/bcs/outer_wall_bc.cpp
-    src/bcs/solid_wall_bc.cpp
-    src/bcs/axis_symmetry_bc.cpp
+    # BC implementation
+    src/bcs/per_field_bc.cpp
 
     # Built-in geometry implementations
     src/geometries/short_cathode_parabolic.cpp

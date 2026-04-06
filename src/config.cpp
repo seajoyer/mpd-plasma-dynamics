@@ -14,57 +14,102 @@ void SimConfig::init() {
     dy = 1.0 / M_max;
 }
 
-// Serialise a YAML::Node back to a compact string so that it can be stored
-// in BCSegmentConfig::params_yaml and re-parsed at factory time.
-static std::string node_to_string(const YAML::Node& n) {
-    if (!n || n.IsNull()) return {};
-    std::ostringstream oss;
-    oss << n;
-    return oss.str();
+// ---- FieldCond parser -------------------------------------------------------
+//
+// Accepts three YAML forms for a single field condition:
+//
+//   neumann                        # short: type name as scalar string
+//   wall_tangent
+//   axis_lf
+//   { dirichlet: 1.0 }             # map with implicit value key
+//   { type: dirichlet, value: 1.0 } # verbose map
+//
+// Unrecognised keys throw std::runtime_error.
+
+static FieldCond parse_field_cond(const YAML::Node& n) {
+    if (!n || n.IsNull())
+        return {};   // default: Neumann
+
+    // ---- Short scalar form: type name only ----
+    if (n.IsScalar()) {
+        const auto s = n.as<std::string>();
+        if (s == "neumann")      return {FieldCondType::Neumann};
+        if (s == "wall_tangent") return {FieldCondType::WallTangent};
+        if (s == "axis_lf")      return {FieldCondType::AxisLF};
+        throw std::runtime_error(
+            "config: unknown field condition '" + s + "'.\n"
+            "  Valid scalar types: neumann, wall_tangent, axis_lf.\n"
+            "  For a fixed value use: { dirichlet: <value> }");
+    }
+
+    // ---- Map form ----
+    if (n.IsMap()) {
+        // Short map: { dirichlet: 1.0 }
+        if (n["dirichlet"])
+            return {FieldCondType::Dirichlet, n["dirichlet"].as<double>()};
+
+        // Verbose map: { type: ..., value: ... }
+        if (n["type"]) {
+            const auto t = n["type"].as<std::string>();
+            if (t == "neumann")      return {FieldCondType::Neumann};
+            if (t == "wall_tangent") return {FieldCondType::WallTangent};
+            if (t == "axis_lf")      return {FieldCondType::AxisLF};
+            if (t == "dirichlet") {
+                if (!n["value"])
+                    throw std::runtime_error(
+                        "config: dirichlet condition requires a 'value' key");
+                return {FieldCondType::Dirichlet, n["value"].as<double>()};
+            }
+            throw std::runtime_error(
+                "config: unknown field condition type '" + t + "'");
+        }
+    }
+
+    throw std::runtime_error(
+        "config: field condition must be a scalar type name or a map "
+        "{ dirichlet: <value> } / { type: ..., value: ... }");
 }
 
-// Parse one face's boundary-condition list from a YAML sequence node.
+// ---- Face parser ------------------------------------------------------------
 //
-// Two formats are accepted for maximum convenience:
+// Each face is a YAML sequence of segment maps.  Each map may contain:
 //
-//   # Short form — single type, full face, no range
-//   l_lo: inflow
+//   range     (optional)  [global_lo, global_hi]  — negative = sentinel
+//   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
+//             (all optional, default Neumann)      — FieldCond specification
 //
-//   # Long form — sequence of segment maps
+// Example:
 //   m_lo:
-//     - range: [0, 320]
-//       type: solid_wall
-//     - range: [321, -1]
-//       type: axis_symmetry
-//       params:
-//         some_key: some_value
-//
-// The `range` key is optional; omitting it is equivalent to [-1, -1]
-// (full face).
+//     - range: [0, 260]
+//       v_r:  wall_tangent
+//       H_r:  wall_tangent
+//     - range: [261, -1]
+//       rho:  axis_lf
+//       v_z:  axis_lf
+//       v_r:  { dirichlet: 0.0 }
+//       v_phi: { dirichlet: 0.0 }
+//       e:    axis_lf
+//       H_z:  axis_lf
+//       H_r:  { dirichlet: 0.0 }
+//       H_phi: { dirichlet: 0.0 }
+
 static BCFaceConfig parse_face(const YAML::Node& node) {
     BCFaceConfig face;
     if (!node) return face;
 
-    // Short form: "l_lo: inflow"
-    if (node.IsScalar()) {
-        BCSegmentConfig seg;
-        seg.type = node.as<std::string>();
-        face.segments.push_back(std::move(seg));
-        return face;
-    }
-
-    // Long form: sequence of segment maps.
     if (!node.IsSequence())
-        throw std::runtime_error("config: boundary condition face must be a "
-                                 "scalar type name or a YAML sequence of segments");
+        throw std::runtime_error(
+            "config: each boundary-condition face must be a YAML sequence "
+            "of segment maps");
 
     for (const YAML::Node& item : node) {
+        if (!item.IsMap())
+            throw std::runtime_error(
+                "config: each BC segment must be a YAML map");
+
         BCSegmentConfig seg;
 
-        if (!item["type"])
-            throw std::runtime_error("config: each BC segment must have a 'type' key");
-        seg.type = item["type"].as<std::string>();
-
+        // Optional range
         if (item["range"]) {
             const YAML::Node& rng = item["range"];
             if (!rng.IsSequence() || rng.size() != 2)
@@ -74,10 +119,16 @@ static BCFaceConfig parse_face(const YAML::Node& node) {
             seg.global_lo = rng[0].as<int>();
             seg.global_hi = rng[1].as<int>();
         }
-        // else: both stay at -1 (full-face sentinel)
 
-        if (item["params"])
-            seg.params_yaml = node_to_string(item["params"]);
+        // Per-field conditions (all optional; absent = Neumann)
+        seg.rho   = parse_field_cond(item["rho"]);
+        seg.v_z   = parse_field_cond(item["v_z"]);
+        seg.v_r   = parse_field_cond(item["v_r"]);
+        seg.v_phi = parse_field_cond(item["v_phi"]);
+        seg.e     = parse_field_cond(item["e"]);
+        seg.H_z   = parse_field_cond(item["H_z"]);
+        seg.H_r   = parse_field_cond(item["H_r"]);
+        seg.H_phi = parse_field_cond(item["H_phi"]);
 
         face.segments.push_back(std::move(seg));
     }
@@ -149,7 +200,11 @@ void SimConfig::load(const std::string& path) {
     // ---- geometry ----------------------------------------------------------
     if (auto n = cfg["geometry"]) {
         if (n["type"])   geometry.type        = n["type"].as<std::string>();
-        if (n["params"]) geometry.params_yaml = node_to_string(n["params"]);
+        if (n["params"]) {
+            std::ostringstream oss;
+            oss << n["params"];
+            geometry.params_yaml = oss.str();
+        }
     }
 
     // ---- boundary conditions -----------------------------------------------
