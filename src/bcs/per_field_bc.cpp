@@ -40,6 +40,19 @@ PerFieldBC::PerFieldBC(FaceBC::Face face, const BCSegmentConfig& seg)
         face_ != FaceBC::Face::M_LO && face_ != FaceBC::Face::M_HI)
         throw std::runtime_error(
             "PerFieldBC: WallTangent condition is only valid on M_LO / M_HI faces");
+
+    // Validate HPhi_r0_over_r is only applied to H_phi.
+    const bool hphi_r0_on_other =
+        seg.rho.type   == FieldCondType::HPhi_r0_over_r ||
+        seg.v_z.type   == FieldCondType::HPhi_r0_over_r ||
+        seg.v_r.type   == FieldCondType::HPhi_r0_over_r ||
+        seg.v_phi.type == FieldCondType::HPhi_r0_over_r ||
+        seg.e.type     == FieldCondType::HPhi_r0_over_r ||
+        seg.H_z.type   == FieldCondType::HPhi_r0_over_r ||
+        seg.H_r.type   == FieldCondType::HPhi_r0_over_r;
+    if (hphi_r0_on_other)
+        throw std::runtime_error(
+            "PerFieldBC: HPhi_r0_over_r condition is only valid for the H_phi field");
 }
 
 // ============================================================
@@ -80,13 +93,14 @@ void PerFieldBC::apply(BCContext& ctx) const {
 
     // ---- Helper: resolve one scalar condition at a single cell -------------
     // Returns the value to write into the boundary cell.
-    // WallTangent and AxisLF are handled separately (they need more context),
-    // so this helper returns the current cell value unchanged for those types.
+    // WallTangent, AxisLF, and HPhi_r0_over_r are handled separately (they
+    // need more context), so this helper returns the current cell value
+    // unchanged for those types.
     auto resolve = [](const FieldCond& c, double cell, double nb) -> double {
         switch (c.type) {
             case FieldCondType::Neumann:   return nb;
             case FieldCondType::Dirichlet: return c.value;
-            default:                       return cell;   // WallTangent / AxisLF
+            default:                       return cell;   // handled externally
         }
     };
 
@@ -107,11 +121,12 @@ void PerFieldBC::apply(BCContext& ctx) const {
             f.e    [l][m] = resolve(e_,     f.e    [l][m], f.e    [ln][m]);
             f.H_z  [l][m] = resolve(H_z_,   f.H_z  [l][m], f.H_z  [ln][m]);
             f.H_r  [l][m] = resolve(H_r_,   f.H_r  [l][m], f.H_r  [ln][m]);
-            f.H_phi[l][m] = resolve(H_phi_, f.H_phi[l][m], f.H_phi[ln][m]);
 
-            // WallTangent is not physically meaningful on L faces, but if
-            // somehow specified the fall-through in resolve() leaves the
-            // value unchanged (equivalent to Neumann from the previous step).
+            // H_phi: free-vortex profile H_phi = r_0 / r  (enforces H_phi·r = const)
+            if (H_phi_.type == FieldCondType::HPhi_r0_over_r)
+                f.H_phi[l][m] = g.r_0 / g.r[l][m];
+            else
+                f.H_phi[l][m] = resolve(H_phi_, f.H_phi[l][m], f.H_phi[ln][m]);
 
             // --- Step 2: rebuild conservative vars from physical ------------
             rebuild_u_from_physical(f, g, l, m);
@@ -140,7 +155,12 @@ void PerFieldBC::apply(BCContext& ctx) const {
         f.rho  [l][m] = resolve(rho_,   f.rho  [l][m], f.rho  [l][mn]);
         f.v_phi[l][m] = resolve(v_phi_, f.v_phi[l][m], f.v_phi[l][mn]);
         f.e    [l][m] = resolve(e_,     f.e    [l][m], f.e    [l][mn]);
-        f.H_phi[l][m] = resolve(H_phi_, f.H_phi[l][m], f.H_phi[l][mn]);
+
+        // H_phi: free-vortex profile or standard conditions
+        if (H_phi_.type == FieldCondType::HPhi_r0_over_r)
+            f.H_phi[l][m] = g.r_0 / g.r[l][m];
+        else
+            f.H_phi[l][m] = resolve(H_phi_, f.H_phi[l][m], f.H_phi[l][mn]);
 
         // v_z and H_z must be set before wall-tangent v_r / H_r.
         f.v_z[l][m] = resolve(v_z_, f.v_z[l][m], f.v_z[l][mn]);

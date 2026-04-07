@@ -10,20 +10,23 @@
 ///
 /// Supported condition types (see FieldCondType for full documentation):
 ///
-///   Neumann      Zero-gradient: copy from the first interior cell.
-///   Dirichlet    Fix to a constant value.
-///   WallTangent  Radial component derived from wall-slope metric.
-///                v_r = v_z · r_z   or   H_r = H_z · r_z.
-///                Valid only for v_r / H_r on M_LO and M_HI faces.
-///   AxisLF       Half-stencil Lax–Friedrichs update for the axis of symmetry.
-///                Valid only for rho / v_z / e / H_z on the M_LO face.
-///                Writes the corresponding conservative u_* array directly;
-///                physical reconstruction is deferred to the end-of-step
-///                Fields::update_physical_from_u() call in Solver::advance().
+///   Neumann         Zero-gradient: copy from the first interior cell.
+///   Dirichlet       Fix to a constant value.
+///   WallTangent     Radial component derived from wall-slope metric.
+///                   v_r = v_z · r_z   or   H_r = H_z · r_z.
+///                   Valid only for v_r / H_r on M_LO and M_HI faces.
+///   AxisLF          Half-stencil Lax–Friedrichs update for the axis of symmetry.
+///                   Valid only for rho / v_z / e / H_z on the M_LO face.
+///                   Writes the corresponding conservative u_* array directly;
+///                   physical reconstruction is deferred to the end-of-step
+///                   Fields::update_physical_from_u() call in Solver::advance().
+///   HPhi_r0_over_r  Free-vortex inlet profile for H_phi: H_phi = r_0 / r.
+///                   Enforces H_phi · r = r_0 = const (no azimuthal current).
+///                   Valid only for H_phi.
 ///
 /// Step flow for each boundary cell
 /// ─────────────────────────────────
-///   1. Apply Neumann / Dirichlet / WallTangent conditions to physical vars.
+///   1. Apply Neumann / Dirichlet / WallTangent / HPhi_r0_over_r to physical vars.
 ///   2. Call rebuild_u_from_physical() to keep conservative arrays consistent.
 ///   3. Overwrite u_* for any AxisLF fields with the one-sided LF stencil.
 ///

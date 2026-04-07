@@ -75,6 +75,14 @@ geometry:
 #                     is written directly; physical reconstruction happens
 #                     at the end of each time step automatically.
 #
+#   hphi_r0_over_r    Free-vortex inlet profile for H_phi:
+#                       H_phi = r_0 / r
+#                     where r_0 = (r_inner(0) + r_outer(0)) / 2.
+#                     Enforces H_phi · r = r_0 = const across the face,
+#                     which is the correct current-free azimuthal field
+#                     profile (no azimuthal current at inlet / outlet).
+#                     Valid only for H_phi.
+#
 # Free-axis convention
 # ─────────────────────
 #   l_lo / l_hi faces  →  free axis is m  (range values are global m indices)
@@ -86,17 +94,18 @@ boundary_conditions:
   # Density and transverse fields are fixed; v_z is taken from the adjacent
   # interior cell to keep the inflow mass flux self-consistent (Neumann on
   # v_z is the natural choice for a subsonic inlet).
+  # H_phi uses the free-vortex profile H_phi = r_0 / r so that H_phi · r
+  # is uniform across the inlet, matching the initial condition and
+  # enforcing a current-free azimuthal field at the boundary.
   l_lo:
     - rho:   { dirichlet: 1.0 }
       v_z:   neumann              # copied from l=2 → mass-flux consistent
       v_r:   { dirichlet: 0.0 }
       v_phi: { dirichlet: 0.0 }
-      e:     { dirichlet: 0.0373 } # beta / (2*(gamma-1)) ≈ 0.05 / (2*0.67)
+      e:     { dirichlet: 0.0373 } # beta / (2*(gamma-1)) = 0.05 / (2*0.67)
       H_z:   { dirichlet: 0.25 }   # = H_z0
       H_r:   { dirichlet: 0.0 }
-      H_phi: { dirichlet: 1.0 }   # r_0 / r ≈ 1 at the centreplane; PerFieldBC
-                                   # applies this as a constant; for a spatially
-                                   # varying r_0/r profile write a custom BC.
+      H_phi: hphi_r0_over_r        # H_phi = r_0 / r  →  H_phi·r = r_0 = const
 
   # ── Outflow at z = L ────────────────────────────────────────────────────
   # Zero-gradient (Neumann) for all fields — standard supersonic/outflow BC.
@@ -171,7 +180,7 @@ boundary_conditions:
 #       e:     { dirichlet: 0.0373 }
 #       H_z:   { dirichlet: 0.25 }
 #       H_r:   { dirichlet: 0.0 }
-#       H_phi: { dirichlet: 1.0 }
+#       H_phi: hphi_r0_over_r
 #
 #     - range: [100, 200]        # m = 100..200 — denser injection strip
 #       rho:   { dirichlet: 1.5 }
@@ -181,7 +190,7 @@ boundary_conditions:
 #       e:     { dirichlet: 0.0373 }
 #       H_z:   { dirichlet: 0.25 }
 #       H_r:   { dirichlet: 0.0 }
-#       H_phi: { dirichlet: 1.0 }
+#       H_phi: hphi_r0_over_r
 #
 #     - range: [201, -1]         # m = 201..end — standard inflow
 #       rho:   { dirichlet: 1.0 }
@@ -191,4 +200,4 @@ boundary_conditions:
 #       e:     { dirichlet: 0.0373 }
 #       H_z:   { dirichlet: 0.25 }
 #       H_r:   { dirichlet: 0.0 }
-#       H_phi: { dirichlet: 1.0 }
+#       H_phi: hphi_r0_over_r

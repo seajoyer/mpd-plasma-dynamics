@@ -18,11 +18,12 @@ void SimConfig::init() {
 //
 // Accepts three YAML forms for a single field condition:
 //
-//   neumann                        # short: type name as scalar string
+//   neumann                          # short: type name as scalar string
 //   wall_tangent
 //   axis_lf
-//   { dirichlet: 1.0 }             # map with implicit value key
-//   { type: dirichlet, value: 1.0 } # verbose map
+//   hphi_r0_over_r
+//   { dirichlet: 1.0 }               # map with implicit value key
+//   { type: dirichlet, value: 1.0 }  # verbose map
 //
 // Unrecognised keys throw std::runtime_error.
 
@@ -33,12 +34,13 @@ static FieldCond parse_field_cond(const YAML::Node& n) {
     // ---- Short scalar form: type name only ----
     if (n.IsScalar()) {
         const auto s = n.as<std::string>();
-        if (s == "neumann")      return {FieldCondType::Neumann};
-        if (s == "wall_tangent") return {FieldCondType::WallTangent};
-        if (s == "axis_lf")      return {FieldCondType::AxisLF};
+        if (s == "neumann")          return {FieldCondType::Neumann};
+        if (s == "wall_tangent")     return {FieldCondType::WallTangent};
+        if (s == "axis_lf")          return {FieldCondType::AxisLF};
+        if (s == "hphi_r0_over_r")   return {FieldCondType::HPhi_r0_over_r};
         throw std::runtime_error(
             "config: unknown field condition '" + s + "'.\n"
-            "  Valid scalar types: neumann, wall_tangent, axis_lf.\n"
+            "  Valid scalar types: neumann, wall_tangent, axis_lf, hphi_r0_over_r.\n"
             "  For a fixed value use: { dirichlet: <value> }");
     }
 
@@ -51,9 +53,10 @@ static FieldCond parse_field_cond(const YAML::Node& n) {
         // Verbose map: { type: ..., value: ... }
         if (n["type"]) {
             const auto t = n["type"].as<std::string>();
-            if (t == "neumann")      return {FieldCondType::Neumann};
-            if (t == "wall_tangent") return {FieldCondType::WallTangent};
-            if (t == "axis_lf")      return {FieldCondType::AxisLF};
+            if (t == "neumann")          return {FieldCondType::Neumann};
+            if (t == "wall_tangent")     return {FieldCondType::WallTangent};
+            if (t == "axis_lf")          return {FieldCondType::AxisLF};
+            if (t == "hphi_r0_over_r")   return {FieldCondType::HPhi_r0_over_r};
             if (t == "dirichlet") {
                 if (!n["value"])
                     throw std::runtime_error(
@@ -77,21 +80,6 @@ static FieldCond parse_field_cond(const YAML::Node& n) {
 //   range     (optional)  [global_lo, global_hi]  — negative = sentinel
 //   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
 //             (all optional, default Neumann)      — FieldCond specification
-//
-// Example:
-//   m_lo:
-//     - range: [0, 260]
-//       v_r:  wall_tangent
-//       H_r:  wall_tangent
-//     - range: [261, -1]
-//       rho:  axis_lf
-//       v_z:  axis_lf
-//       v_r:  { dirichlet: 0.0 }
-//       v_phi: { dirichlet: 0.0 }
-//       e:    axis_lf
-//       H_z:  axis_lf
-//       H_r:  { dirichlet: 0.0 }
-//       H_phi: { dirichlet: 0.0 }
 
 static BCFaceConfig parse_face(const YAML::Node& node) {
     BCFaceConfig face;
