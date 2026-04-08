@@ -55,31 +55,31 @@ public:
 
     // Non-copyable, movable.
     FaceBC(const FaceBC&)            = delete;
-    FaceBC& operator=(const FaceBC&) = delete;
+    auto operator=(const FaceBC&) -> FaceBC& = delete;
     FaceBC(FaceBC&&)                 = default;
-    FaceBC& operator=(FaceBC&&)      = default;
+    auto operator=(FaceBC&&) -> FaceBC&      = default;
 
     /// Build from config, creating a PerFieldBC for each segment.
-    static FaceBC from_config(Face face, const BCFaceConfig& face_cfg);
+    static auto FromConfig(Face face, const BCFaceConfig& face_cfg) -> FaceBC;
 
     /// Apply all segments to the appropriate cells on this rank.
     /// No-op if this rank does not own the face.
-    void apply(Fields& f, const Grid& g, const SimConfig& cfg,
+    void Apply(Fields& f, const Grid& g, const SimConfig& cfg,
                const MPIManager& mpi, double dt) const;
 
-    Face face() const { return face_; }
+    [[nodiscard]] auto Face() const -> Face { return face_; }
 
 private:
-    Face                   face_;
+    enum Face                   face_;
     std::vector<BCSegment> segments_;
 
-    bool owns_face(const MPIManager& mpi) const noexcept;
+    [[nodiscard]] auto OwnsFace(const MPIManager& mpi) const noexcept -> bool;
 
     /// Real (non-sentinel) global range of the face's free axis.
-    std::pair<int,int> face_global_range(const SimConfig& cfg) const noexcept;
+    [[nodiscard]] auto FaceGlobalRange(const SimConfig& cfg) const noexcept -> std::pair<int,int>;
 
     /// Clip [g_lo, g_hi] to this rank's owned slice and convert to local indices.
     /// Returns false if the intersection is empty.
-    bool clip_to_local(int g_lo, int g_hi, const MPIManager& mpi,
-                       int& local_lo, int& local_hi) const noexcept;
+    auto ClipToLocal(int g_lo, int g_hi, const MPIManager& mpi,
+                       int& local_lo, int& local_hi) const noexcept -> bool;
 };

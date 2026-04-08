@@ -12,9 +12,9 @@ namespace Diagnostics {
 /// Compute the global maximum wave speed across all MPI ranks.
 /// Includes sound speed, Alfvén speed, and bulk flow speed.
 /// @return  max( |v| + c_s + c_a )  over all interior cells on all processes.
-double max_wave_speed(const Fields& f, const SimConfig& cfg,
+auto MaxWaveSpeed(const Fields& f, const SimConfig& cfg,
                       int local_L, int local_M,
-                      const MPIManager& mpi);
+                      const MPIManager& mpi) -> double;
 
 /// Compute the next adaptive time step that satisfies the CFL condition.
 ///
@@ -31,20 +31,20 @@ double max_wave_speed(const Fields& f, const SimConfig& cfg,
 /// @param dt_current  The dt used in the step that just completed.
 ///                    Used to enforce the growth-rate limit.
 /// @return            Recommended dt for the *next* time step.
-double compute_dt(const Fields& f, const SimConfig& cfg,
+auto ComputeDt(const Fields& f, const SimConfig& cfg,
                   int local_L, int local_M,
                   const MPIManager& mpi,
-                  double dt_current);
+                  double dt_current) -> double;
 
 /// Compute the relative change in the solution between the current
 /// fields and the fields stored in the prev arrays.
 /// Returns ||curr - prev|| / ||curr||  (L2 norm summed over all 7 fields).
-double solution_change(const Fields& f, int local_L, int local_M);
+auto SolutionChange(const Fields& f, int local_L, int local_M) -> double;
 
 /// Emit a CFL warning if the current time step exceeds the CFL limit.
 /// Only prints on rank 0 and only every 1000 steps.
 /// Useful as a sanity check even when adaptive_dt is enabled.
-void check_cfl(const Fields& f, const SimConfig& cfg,
+void CheckCfl(const Fields& f, const SimConfig& cfg,
                const MPIManager& mpi,
                int local_L, int local_M,
                double dt, int step_count);

@@ -19,24 +19,15 @@ namespace YAML { class Node; }
 ///
 /// The derivative dr_inner/dz is C¹ continuous everywhere and zero outside
 /// the transition band, making this profile better conditioned than the
-/// piecewise-parabolic coaxial_nozzle profile near the throat.
-///
-/// Recommended boundary-condition split for this geometry (in config.yaml):
-///   m_lo:
-///     - range: [0, 260]     # z ≤ 0.325 — solid cathode wall
-///       type: solid_wall
-///     - range: [261, -1]    # z > 0.325 — open axis of symmetry
-///       type: axis_symmetry
-///
-/// (With L_max_global = 800 and dz = 1/800, global l = 260 → z = 0.325.)
+/// piecewise-parabolic short_cathode_parabolic profile near the throat.
 class ShortCathodeCosineGeometry : public IGeometry {
 public:
     explicit ShortCathodeCosineGeometry(const YAML::Node& /*params*/) {}
 
-    double r_inner    (double z) const override;
-    double r_outer    (double z) const override;
-    double dr_inner_dz(double z) const override;
-    double dr_outer_dz(double z) const override;
+    [[nodiscard]] auto RInner    (double z) const -> double override;
+    [[nodiscard]] auto ROuter    (double z) const -> double override;
+    [[nodiscard]] auto DrInnerDz(double z) const -> double override;
+    [[nodiscard]] auto DrOuterDz(double z) const -> double override;
 
-    std::string name() const override { return "short_cathode_cosine"; }
+    [[nodiscard]] auto Name() const -> std::string override { return "short_cathode_cosine"; }
 };

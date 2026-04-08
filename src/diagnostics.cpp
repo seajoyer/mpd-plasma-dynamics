@@ -11,9 +11,9 @@ namespace Diagnostics {
 // max_wave_speed
 // ============================================================
 
-double max_wave_speed(const Fields& f, const SimConfig& cfg,
+auto MaxWaveSpeed(const Fields& f, const SimConfig& cfg,
                       int local_L, int local_M,
-                      const MPIManager& mpi) {
+                      const MPIManager& mpi) -> double {
     double local_max = 0.0;
 
     // Iterate over interior cells only: [1..local_L][1..local_M].
@@ -46,11 +46,11 @@ double max_wave_speed(const Fields& f, const SimConfig& cfg,
 // compute_dt
 // ============================================================
 
-double compute_dt(const Fields& f, const SimConfig& cfg,
+auto ComputeDt(const Fields& f, const SimConfig& cfg,
                   int local_L, int local_M,
                   const MPIManager& mpi,
-                  double dt_current) {
-    const double speed = max_wave_speed(f, cfg, local_L, local_M, mpi);
+                  double dt_current) -> double {
+    const double speed = MaxWaveSpeed(f, cfg, local_L, local_M, mpi);
 
     // CFL-limited step: dt = C * dx / max_speed
     // A small epsilon prevents division by zero in a perfectly quiescent field.
@@ -68,7 +68,7 @@ double compute_dt(const Fields& f, const SimConfig& cfg,
 // solution_change
 // ============================================================
 
-double solution_change(const Fields& f, int local_L, int local_M) {
+auto SolutionChange(const Fields& f, int local_L, int local_M) -> double {
     double sum_diff = 0.0;
     double sum_curr = 0.0;
 
@@ -109,11 +109,11 @@ double solution_change(const Fields& f, int local_L, int local_M) {
 // check_cfl
 // ============================================================
 
-void check_cfl(const Fields& f, const SimConfig& cfg,
+void CheckCfl(const Fields& f, const SimConfig& cfg,
                const MPIManager& mpi,
                int local_L, int local_M,
                double dt, int step_count) {
-    const double speed  = max_wave_speed(f, cfg, local_L, local_M, mpi);
+    const double speed  = MaxWaveSpeed(f, cfg, local_L, local_M, mpi);
     const double dx     = std::min(cfg.dz, cfg.dy);
     const double dt_max = cfg.cfl_number * dx / (speed + 1.0e-10);
 

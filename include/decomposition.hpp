@@ -1,7 +1,5 @@
 #pragma once
 
-#include "types.hpp"
-
 // Helper function to compute balanced domain decomposition
 // Distributes remainder cells evenly across first N processes
 inline void ComputeBalancedDecomposition(int L_max_global, int size, int rank,

@@ -17,9 +17,9 @@ class GeometryRegistry {
 public:
     using Factory = std::function<std::unique_ptr<IGeometry>(const YAML::Node&)>;
 
-    static GeometryRegistry& instance();
+    static auto Instance() -> GeometryRegistry&;
 
-    void register_geometry(std::string name, Factory factory);
+    void RegisterGeometry(std::string name, Factory factory);
 
     /// Throws std::runtime_error if `type` is unknown.
     std::unique_ptr<IGeometry> create(const std::string& type,

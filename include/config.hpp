@@ -14,7 +14,7 @@
 /// `params_yaml` holds the raw YAML text of the optional `params` sub-node,
 ///               which is parsed and forwarded to the geometry factory.
 struct GeometryConfig {
-    std::string type        = "coaxial_nozzle";
+    std::string type = "short_cathode_cosine";
     std::string params_yaml;   ///< empty → no params; factory receives a null node
 };
 
@@ -135,11 +135,11 @@ struct SimConfig {
     double dz{};
     double dy{};
 
-    SimConfig() { init(); }
+    SimConfig() { Init(); }
 
     /// Load all parameters from a YAML file and compute derived quantities.
-    void load(const std::string& path = "config.yaml");
+    void Load(const std::string& path = "config.yaml");
 
 private:
-    void init();
+    void Init();
 };

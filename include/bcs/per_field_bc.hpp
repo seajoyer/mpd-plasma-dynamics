@@ -36,13 +36,13 @@ public:
     /// @param face  Which of the four Cartesian faces this segment belongs to.
     ///              Required to determine the fixed index and Neumann direction.
     /// @param seg   Per-field condition configuration read from config.yaml.
-    PerFieldBC(FaceBC::Face face, const BCSegmentConfig& seg);
+    PerFieldBC(enum FaceBC::Face face, const BCSegmentConfig& seg);
 
-    void        apply(BCContext& ctx) const override;
-    std::string name()                const override { return "per_field"; }
+    void        Apply(BCContext& ctx) const override;
+    [[nodiscard]] auto Name()                const -> std::string override { return "per_field"; }
 
 private:
-    FaceBC::Face face_;
+    enum FaceBC::Face face_;
 
     FieldCond rho_;
     FieldCond v_z_;
@@ -59,12 +59,12 @@ private:
     // Each method mirrors the corresponding update in the original
     // axis_symmetry_bc.cpp, expressed as a free-standing formula so that
     // the caller can skip any field that is not configured as AxisLF.
-    static double axis_lf_u1(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz);
-    static double axis_lf_u2(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz);
-    static double axis_lf_u5(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz);
-    static double axis_lf_u7(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz);
+    static auto AxisLfU1(const Fields& f, const Grid& g,
+                              int l, int m, double dt, double dz) -> double;
+    static auto AxisLfU2(const Fields& f, const Grid& g,
+                              int l, int m, double dt, double dz) -> double;
+    static auto AxisLfU5(const Fields& f, const Grid& g,
+                              int l, int m, double dt, double dz) -> double;
+    static auto AxisLfU7(const Fields& f, const Grid& g,
+                              int l, int m, double dt, double dz) -> double;
 };

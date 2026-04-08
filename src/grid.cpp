@@ -13,11 +13,11 @@ Grid::Grid(const SimConfig& cfg_, int lwg, int ls, int lmwg, int ms,
       R  (lwg, 0.0),
       dr (lwg, 0.0)
 {
-    r_0 = (geom.r_inner(0.0) + geom.r_outer(0.0)) / 2.0;
-    build();
+    r_0 = (geom.RInner(0.0) + geom.ROuter(0.0)) / 2.0;
+    Build();
 }
 
-void Grid::build() {
+void Grid::Build() {
     const double dy = cfg.dy;
     const double dz = cfg.dz;
 
@@ -26,7 +26,7 @@ void Grid::build() {
         const int    l_global = l_start + l - 1;
         const double z        = l_global * dz;
 
-        R[l]  = geom.r_outer(z) - geom.r_inner(z);
+        R[l]  = geom.ROuter(z) - geom.RInner(z);
         dr[l] = R[l] / cfg.M_max;   // global radial cell spacing
 
         for (int m = 0; m < local_M_with_ghosts; ++m) {
@@ -34,9 +34,9 @@ void Grid::build() {
             const int    m_global = m_start + m - 1;
             const double frac     = m_global * dy;   // == m_global / M_max
 
-            r  [l][m] = (1.0 - frac) * geom.r_inner(z) + frac * geom.r_outer(z);
-            r_z[l][m] = (1.0 - frac) * geom.dr_inner_dz(z)
-                      + frac          * geom.dr_outer_dz(z);
+            r  [l][m] = (1.0 - frac) * geom.RInner(z) + frac * geom.ROuter(z);
+            r_z[l][m] = (1.0 - frac) * geom.DrInnerDz(z)
+                      + frac         * geom.DrOuterDz(z);
         }
     }
 }

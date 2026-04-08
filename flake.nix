@@ -44,15 +44,6 @@
             # Help CMake find OpenMP
             export OpenMP_omp_LIBRARY="${pkgs.llvmPackages_latest.openmp}/lib/libomp.so"
 
-            # Generate .clangd config for IDE support (clangd from clang-tools)
-            cat > .clangd << EOF
-CompileFlags:
-  Add:
-    - "-stdlib=libc++"
-    - "-I${pkgs.llvmPackages_latest.libcxx.dev}/include/c++/v1"
-  CompilationDatabase: build/
-EOF
-
             echo "C++ dev environment ready (clangStdenv)"
             echo "CC=$CC  CXX=$CXX"
             echo ".clangd configuration written"

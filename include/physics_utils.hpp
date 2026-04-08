@@ -12,7 +12,7 @@
 ///
 /// This is a free inline function rather than a Solver member so that any
 /// IBoundaryCondition implementation can call it without depending on Solver.
-inline void rebuild_u_from_physical(Fields& f, const Grid& g, int l, int m) noexcept {
+inline void RebuildUFromPhysical(Fields& f, const Grid& g, int l, int m) noexcept {
     f.u_1[l][m] = f.rho  [l][m] * g.r[l][m];
     f.u_2[l][m] = f.rho  [l][m] * f.v_z  [l][m] * g.r[l][m];
     f.u_3[l][m] = f.rho  [l][m] * f.v_r  [l][m] * g.r[l][m];

@@ -43,5 +43,5 @@ public:
          const IGeometry& geom);
 
 private:
-    void build();
+    void Build();
 };

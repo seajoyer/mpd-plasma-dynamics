@@ -2,7 +2,7 @@
 #include "igeometry.hpp"
 namespace YAML { class Node; }
 
-/// Coaxial nozzle-channel geometry (the original hard-coded profile).
+/// Short cathode geometry with a parabolic-smoothed inner-wall transition.
 ///
 /// Outer wall: r_outer(z) = 0.8  (constant)
 ///
@@ -18,10 +18,10 @@ class ShortCathodeParabolicGeometry : public IGeometry {
 public:
     explicit ShortCathodeParabolicGeometry(const YAML::Node& /*params*/) {}
 
-    double r_inner    (double z) const override;
-    double r_outer    (double z) const override;
-    double dr_inner_dz(double z) const override;
-    double dr_outer_dz(double z) const override;
+    [[nodiscard]] auto RInner    (double z) const -> double override;
+    [[nodiscard]] auto ROuter    (double z) const -> double override;
+    [[nodiscard]] auto DrInnerDz(double z) const -> double override;
+    [[nodiscard]] auto DrOuterDz(double z) const -> double override;
 
-    std::string name() const override { return "short_cathode_parabolic"; }
+    [[nodiscard]] auto Name() const -> std::string override { return "short_cathode_parabolic"; }
 };

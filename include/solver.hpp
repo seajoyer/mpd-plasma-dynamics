@@ -27,7 +27,7 @@ public:
            const Grid& grid, Fields& f);
 
     /// Execute one complete time step using the supplied dt.
-    void advance(double dt);
+    void Advance(double dt);
 
 private:
     const SimConfig&  cfg_;
@@ -47,7 +47,7 @@ private:
     std::vector<double> col_batch_buf_;
 
     // ---- sub-steps ----
-    void exchange_all_ghosts();
-    void compute_central_update();
-    void update_central_physical();
+    void ExchangeAllGhosts();
+    void ComputeCentralUpdate();
+    void UpdateCentralPhysical();
 };

@@ -28,8 +28,8 @@ public:
     virtual ~IBoundaryCondition() = default;
 
     /// Apply the boundary condition to the range [ctx.local_lo, ctx.local_hi].
-    virtual void apply(BCContext& ctx) const = 0;
+    virtual void Apply(BCContext& ctx) const = 0;
 
     /// Short identifier for log messages.
-    virtual std::string name() const = 0;
+    [[nodiscard]] virtual auto Name() const -> std::string = 0;
 };

@@ -9,7 +9,7 @@ time:
 
 adaptive_dt:
   enabled:       true
-  cfl_number:    0.45
+  cfl_number:    0.65
   growth_factor: 1.10
   dt_min:        1.0e-9
   dt_max:        5.0e-5
@@ -150,39 +150,3 @@ boundary_conditions:
       H_z:   axis_lf
       H_r:   { dirichlet: 0.0 }
       H_phi: { dirichlet: 0.0 }
-
-# ── Recipe: mixed inlet strip ────────────────────────────────────────────
-# To inject a different condition over part of the inflow face, split l_lo
-# into multiple segments (uncomment and adjust values):
-#
-# boundary_conditions:
-#   l_lo:
-#     - range: [-1, 99]          # m = 0..99  — standard inflow
-#       rho:   { dirichlet: 1.0 }
-#       v_z:   neumann
-#       v_r:   { dirichlet: 0.0 }
-#       v_phi: { dirichlet: 0.0 }
-#       e:     { dirichlet: 0.0373 }
-#       H_z:   { dirichlet: 0.25 }
-#       H_r:   { dirichlet: 0.0 }
-#       H_phi: hphi_r0_over_r
-#
-#     - range: [100, 200]        # m = 100..200 — denser injection strip
-#       rho:   { dirichlet: 1.5 }
-#       v_z:   { dirichlet: 0.15 }
-#       v_r:   { dirichlet: 0.0 }
-#       v_phi: { dirichlet: 0.0 }
-#       e:     { dirichlet: 0.0373 }
-#       H_z:   { dirichlet: 0.25 }
-#       H_r:   { dirichlet: 0.0 }
-#       H_phi: hphi_r0_over_r
-#
-#     - range: [201, -1]         # m = 201..end — standard inflow
-#       rho:   { dirichlet: 1.0 }
-#       v_z:   neumann
-#       v_r:   { dirichlet: 0.0 }
-#       v_phi: { dirichlet: 0.0 }
-#       e:     { dirichlet: 0.0373 }
-#       H_z:   { dirichlet: 0.25 }
-#       H_r:   { dirichlet: 0.0 }
-#       H_phi: hphi_r0_over_r

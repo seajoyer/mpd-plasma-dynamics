@@ -9,8 +9,7 @@
 /// compute the mesh-skew metric r_z = dr/dz).
 ///
 /// Implementations are registered by name in GeometryRegistry and selected at
-/// runtime via the `geometry.type` field in config.yaml.  See
-/// src/geometries/coaxial_nozzle.cpp for a concrete example.
+/// runtime via the `geometry.type` field in config.yaml.
 ///
 /// Lifetime requirement: the geometry object must outlive every Grid that
 /// holds a reference to it (both are typically owned by main()).
@@ -19,17 +18,17 @@ public:
     virtual ~IGeometry() = default;
 
     /// Inner-wall radius at axial position z.
-    virtual double r_inner    (double z) const = 0;
+    [[nodiscard]] virtual auto RInner    (double z) const -> double = 0;
 
     /// Outer-wall radius at axial position z.
-    virtual double r_outer    (double z) const = 0;
+    [[nodiscard]] virtual auto ROuter    (double z) const -> double = 0;
 
     /// d(r_inner)/dz — used for the mesh-skew metric.
-    virtual double dr_inner_dz(double z) const = 0;
+    [[nodiscard]] virtual auto DrInnerDz(double z) const -> double = 0;
 
     /// d(r_outer)/dz — used for the mesh-skew metric.
-    virtual double dr_outer_dz(double z) const = 0;
+    [[nodiscard]] virtual auto DrOuterDz(double z) const -> double = 0;
 
     /// Human-readable name, used in log messages.
-    virtual std::string name() const = 0;
+    [[nodiscard]] virtual auto Name() const -> std::string = 0;
 };

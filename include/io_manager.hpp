@@ -30,10 +30,10 @@ public:
     /// Gather fields from all ranks and write a VTK frame.
     /// Filename: <run_dir>/step_<step04d>.vtk
     /// Must be called collectively by every rank.
-    void write_frame(int step, const Fields& f, const Grid& grid);
+    void WriteFrame(int step, const Fields& f, const Grid& grid);
 
     /// Returns the run directory path (same on all ranks after construction).
-    const std::string& run_dir() const { return run_dir_; }
+    [[nodiscard]] auto RunDir() const -> const std::string& { return run_dir_; }
 
 private:
     const SimConfig&  cfg_;
@@ -49,16 +49,16 @@ private:
 
     /// Gather all distributed field arrays to rank-0 global arrays using
     /// point-to-point communication.
-    void gather_global(const Fields& f, const Grid& grid);
+    void GatherGlobal(const Fields& f, const Grid& grid);
 
     /// Flatten a local interior block [1..local_L][1..local_M] into a
     /// contiguous send buffer of length local_L * local_M.
-    static void pack_field(const Array2D& src, int local_L, int local_M,
+    static void PackField(const Array2D& src, int local_L, int local_M,
                            std::vector<double>& buf);
 
     /// Scatter a flat buffer of length block_L * block_M into the global
     /// array starting at (gl, gm).
-    static void unpack_into_global(Array2D& dst,
+    static void UnpackIntoGlobal(Array2D& dst,
                                    const std::vector<double>& buf,
                                    int gl, int gm,
                                    int block_L, int block_M);
@@ -66,11 +66,11 @@ private:
     /// Fill every cell in the global rank array owned by a given MPI rank.
     /// Called on rank 0 only — no communication required because the block
     /// geometry is already known from the gather envelope.
-    static void fill_rank_block(Array2D& dst, double rank_id,
+    static void FillRankBlock(Array2D& dst, double rank_id,
                                 int gl, int gm,
                                 int block_L, int block_M);
 
     /// Build and write a VTK structured-grid file from the global arrays.
     /// Called by rank 0 only after gather_global().
-    void write_vtk(const std::string& filepath) const;
+    void WriteVtk(const std::string& filepath) const;
 };

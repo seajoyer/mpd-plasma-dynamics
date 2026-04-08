@@ -1,6 +1,5 @@
 #include "solver.hpp"
 
-#include <algorithm>
 #include <cmath>
 
 // ============================================================
@@ -10,68 +9,54 @@
 Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
                const Grid& grid, Fields& f)
     : cfg_(cfg), mpi_(mpi), grid_(grid), f_(f),
-      bc_l_lo_(FaceBC::from_config(FaceBC::Face::L_LO, cfg.bc_l_lo)),
-      bc_l_hi_(FaceBC::from_config(FaceBC::Face::L_HI, cfg.bc_l_hi)),
-      bc_m_lo_(FaceBC::from_config(FaceBC::Face::M_LO, cfg.bc_m_lo)),
-      bc_m_hi_(FaceBC::from_config(FaceBC::Face::M_HI, cfg.bc_m_hi))
+      bc_l_lo_(FaceBC::FromConfig(FaceBC::Face::L_LO, cfg.bc_l_lo)),
+      bc_l_hi_(FaceBC::FromConfig(FaceBC::Face::L_HI, cfg.bc_l_hi)),
+      bc_m_lo_(FaceBC::FromConfig(FaceBC::Face::M_LO, cfg.bc_m_lo)),
+      bc_m_hi_(FaceBC::FromConfig(FaceBC::Face::M_HI, cfg.bc_m_hi))
 {}
 
 // ============================================================
 // Public entry point
 // ============================================================
 
-void Solver::advance(double dt) {
+void Solver::Advance(double dt) {
     current_dt_ = dt;
 
-    exchange_all_ghosts();
-    compute_central_update();
-    update_central_physical();
+    ExchangeAllGhosts();
+    ComputeCentralUpdate();
+    UpdateCentralPhysical();
 
-    // Apply BCs in the same order as the original monolithic solver:
-    //
-    //   1. l_lo (inflow)     — sets l=1 for all m
-    //   2. m_hi (outer wall) — sets m=local_M for all l; overwrites l=1 corner
-    //   3. m_lo (inner wall / axis) — sets m=1 for l=2..local_L-1
-    //                                 (corner policy excludes l=1 and l=local_L)
-    //   4. l_hi (outflow)    — sets l=local_L for all m; runs last so it owns
-    //                          both l=local_L corners (m=1 and m=local_M)
-    //
-    // This order preserves the corner ownership of the original solver:
-    //   (l=1,      m=1)       → inflow   (l_lo, protected by m_lo corner policy)
-    //   (l=1,      m=local_M) → outer_wall (m_hi overwriting l_lo)
-    //   (l=local_L, m=1)      → outflow  (l_hi overwriting m_lo)
-    //   (l=local_L, m=local_M)→ outflow  (l_hi overwriting m_hi)
-    bc_l_lo_.apply(f_, grid_, cfg_, mpi_, dt);
-    bc_m_hi_.apply(f_, grid_, cfg_, mpi_, dt);
-    bc_m_lo_.apply(f_, grid_, cfg_, mpi_, dt);
-    bc_l_hi_.apply(f_, grid_, cfg_, mpi_, dt);
+    bc_l_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
+    bc_m_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
+    bc_m_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
+    bc_l_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
 
     // Full physical reconstruction: covers all cells (central + BC cells).
-    f_.update_physical_from_u(grid_, cfg_, 1, mpi_.local_L, 1, mpi_.local_M);
-    f_.copy_u_to_u0();
+    f_.UpdatePhysicalFromU(grid_, cfg_, 1, mpi_.local_L, 1, mpi_.local_M);
+    f_.CopyUToU0();
 }
 
 // ============================================================
 // Ghost-cell exchange (all 4 directions, all 18 arrays, one phase)
 // ============================================================
 
-void Solver::exchange_all_ghosts() {
+void Solver::ExchangeAllGhosts() {
     double** arrs[18] = {
-        f_.u0_1.raw(), f_.u0_2.raw(), f_.u0_3.raw(), f_.u0_4.raw(),
-        f_.u0_5.raw(), f_.u0_6.raw(), f_.u0_7.raw(), f_.u0_8.raw(),
-        f_.rho.raw(),   f_.v_z.raw(),   f_.v_r.raw(),
-        f_.v_phi.raw(), f_.e.raw(),     f_.p.raw(),
-        f_.P.raw(),     f_.H_z.raw(),   f_.H_r.raw(),
-        f_.H_phi.raw()
+        f_.u0_1.Raw(), f_.u0_2.Raw(), f_.u0_3.Raw(), f_.u0_4.Raw(),
+        f_.u0_5.Raw(), f_.u0_6.Raw(), f_.u0_7.Raw(), f_.u0_8.Raw(),
+        f_.rho.Raw(),   f_.v_z.Raw(),   f_.v_r.Raw(),
+        f_.v_phi.Raw(), f_.e.Raw(),     f_.p.Raw(),
+        f_.P.Raw(),     f_.H_z.Raw(),   f_.H_r.Raw(),
+        f_.H_phi.Raw()
     };
-    mpi_.exchange_ghosts_batch(arrs, 18, col_batch_buf_);
+    mpi_.ExchangeGhostsBatch(arrs, 18, col_batch_buf_);
 }
 
 // ============================================================
 // Lax–Friedrichs central update (interior cells)
 // ============================================================
 
-void Solver::compute_central_update() {
+void Solver::ComputeCentralUpdate() {
     const int    local_L = mpi_.local_L;
     const int    local_M = mpi_.local_M;
     const double dt      = current_dt_;
@@ -80,25 +65,25 @@ void Solver::compute_central_update() {
     // On M boundary ranks the first/last interior row of the M direction
     // belongs to a BC; skip it in the central update so the BC result is
     // not overwritten.
-    const int m_lo = mpi_.is_m_lo_boundary() ? 2 : 1;
-    const int m_hi = mpi_.is_m_hi_boundary() ? local_M - 1 : local_M;
+    const int m_lo = mpi_.IsMLoBoundary() ? 2 : 1;
+    const int m_hi = mpi_.IsMHiBoundary() ? local_M - 1 : local_M;
 
-    auto** u0_1 = f_.u0_1.raw();  auto** u0_2 = f_.u0_2.raw();
-    auto** u0_3 = f_.u0_3.raw();  auto** u0_4 = f_.u0_4.raw();
-    auto** u0_5 = f_.u0_5.raw();  auto** u0_6 = f_.u0_6.raw();
-    auto** u0_7 = f_.u0_7.raw();  auto** u0_8 = f_.u0_8.raw();
+    auto** u0_1 = f_.u0_1.Raw();  auto** u0_2 = f_.u0_2.Raw();
+    auto** u0_3 = f_.u0_3.Raw();  auto** u0_4 = f_.u0_4.Raw();
+    auto** u0_5 = f_.u0_5.Raw();  auto** u0_6 = f_.u0_6.Raw();
+    auto** u0_7 = f_.u0_7.Raw();  auto** u0_8 = f_.u0_8.Raw();
 
-    auto** u_1  = f_.u_1.raw();   auto** u_2  = f_.u_2.raw();
-    auto** u_3  = f_.u_3.raw();   auto** u_4  = f_.u_4.raw();
-    auto** u_5  = f_.u_5.raw();   auto** u_6  = f_.u_6.raw();
-    auto** u_7  = f_.u_7.raw();   auto** u_8  = f_.u_8.raw();
+    auto** u_1  = f_.u_1.Raw();   auto** u_2  = f_.u_2.Raw();
+    auto** u_3  = f_.u_3.Raw();   auto** u_4  = f_.u_4.Raw();
+    auto** u_5  = f_.u_5.Raw();   auto** u_6  = f_.u_6.Raw();
+    auto** u_7  = f_.u_7.Raw();   auto** u_8  = f_.u_8.Raw();
 
-    auto** rho   = f_.rho.raw();   auto** v_z  = f_.v_z.raw();
-    auto** v_r   = f_.v_r.raw();   auto** v_phi= f_.v_phi.raw();
-    auto** p     = f_.p.raw();     auto** P    = f_.P.raw();
-    auto** H_z   = f_.H_z.raw();   auto** H_r  = f_.H_r.raw();
-    auto** H_phi = f_.H_phi.raw();
-    auto** r     = grid_.r.raw();
+    auto** rho   = f_.rho.Raw();   auto** v_z  = f_.v_z.Raw();
+    auto** v_r   = f_.v_r.Raw();   auto** v_phi= f_.v_phi.Raw();
+    auto** p     = f_.p.Raw();     auto** P    = f_.P.Raw();
+    auto** H_z   = f_.H_z.Raw();   auto** H_r  = f_.H_r.Raw();
+    auto** H_phi = f_.H_phi.Raw();
+    auto** r     = grid_.r.Raw();
     const double* dr = grid_.dr.data();
 
     #pragma omp parallel for collapse(2)
@@ -167,8 +152,8 @@ void Solver::compute_central_update() {
     }
 }
 
-void Solver::update_central_physical() {
-    const int m_lo = mpi_.is_m_lo_boundary() ? 2 : 1;
-    const int m_hi = mpi_.is_m_hi_boundary() ? mpi_.local_M - 1 : mpi_.local_M;
-    f_.update_physical_from_u(grid_, cfg_, 1, mpi_.local_L, m_lo, m_hi);
+void Solver::UpdateCentralPhysical() {
+    const int m_lo = mpi_.IsMLoBoundary() ? 2 : 1;
+    const int m_hi = mpi_.IsMHiBoundary() ? mpi_.local_M - 1 : mpi_.local_M;
+    f_.UpdatePhysicalFromU(grid_, cfg_, 1, mpi_.local_L, m_lo, m_hi);
 }

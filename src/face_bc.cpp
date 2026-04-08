@@ -1,7 +1,6 @@
 #include "face_bc.hpp"
 
 #include <algorithm>
-#include <stdexcept>
 
 #include "bc_context.hpp"
 #include "bcs/per_field_bc.hpp"
@@ -14,15 +13,14 @@
 // Construction
 // ============================================================
 
-FaceBC::FaceBC(Face face, std::vector<BCSegment> segments)
-    : face_(face), segments_(std::move(segments))
-{}
+FaceBC::FaceBC(enum Face face, std::vector<BCSegment> segments)
+    : face_(face), segments_(std::move(segments)) {}
 
 // ============================================================
 // Static factory
 // ============================================================
 
-FaceBC FaceBC::from_config(Face face, const BCFaceConfig& face_cfg) {
+auto FaceBC::FromConfig(enum Face face, const BCFaceConfig& face_cfg) -> FaceBC {
     std::vector<BCSegment> segs;
     segs.reserve(face_cfg.segments.size());
 
@@ -30,42 +28,46 @@ FaceBC FaceBC::from_config(Face face, const BCFaceConfig& face_cfg) {
         BCSegment seg;
         seg.global_lo = sc.global_lo;
         seg.global_hi = sc.global_hi;
-        seg.bc        = std::make_unique<PerFieldBC>(face, sc);
+        seg.bc = std::make_unique<PerFieldBC>(face, sc);
         segs.push_back(std::move(seg));
     }
 
-    return FaceBC(face, std::move(segs));
+    return {face, std::move(segs)};
 }
 
 // ============================================================
 // Helpers
 // ============================================================
 
-bool FaceBC::owns_face(const MPIManager& mpi) const noexcept {
+auto FaceBC::OwnsFace(const MPIManager& mpi) const noexcept -> bool {
     switch (face_) {
-        case Face::L_LO: return mpi.is_l_lo_boundary();
-        case Face::L_HI: return mpi.is_l_hi_boundary();
-        case Face::M_LO: return mpi.is_m_lo_boundary();
-        case Face::M_HI: return mpi.is_m_hi_boundary();
+        case Face::L_LO:
+            return mpi.IsLLoBoundary();
+        case Face::L_HI:
+            return mpi.IsLHiBoundary();
+        case Face::M_LO:
+            return mpi.IsMLoBoundary();
+        case Face::M_HI:
+            return mpi.IsMHiBoundary();
     }
     return false;
 }
 
-std::pair<int,int>
-FaceBC::face_global_range(const SimConfig& cfg) const noexcept {
+auto FaceBC::FaceGlobalRange(const SimConfig& cfg) const noexcept
+    -> std::pair<int, int> {
     switch (face_) {
         case Face::L_LO:
         case Face::L_HI:
-            return { 0, cfg.M_max };
+            return {0, cfg.M_max};
         case Face::M_LO:
         case Face::M_HI:
-            return { 0, cfg.L_max_global - 1 };
+            return {0, cfg.L_max_global - 1};
     }
-    return { 0, 0 };
+    return {0, 0};
 }
 
-bool FaceBC::clip_to_local(int g_lo, int g_hi, const MPIManager& mpi,
-                            int& local_lo, int& local_hi) const noexcept {
+auto FaceBC::ClipToLocal(int g_lo, int g_hi, const MPIManager& mpi, int& local_lo,
+                           int& local_hi) const noexcept -> bool {
     int owned_global_lo, owned_global_hi;
 
     switch (face_) {
@@ -86,8 +88,9 @@ bool FaceBC::clip_to_local(int g_lo, int g_hi, const MPIManager& mpi,
     const int clipped_lo = std::max(g_lo, owned_global_lo);
     const int clipped_hi = std::min(g_hi, owned_global_hi);
 
-    if (clipped_lo > clipped_hi)
+    if (clipped_lo > clipped_hi) {
         return false;
+    }
 
     local_lo = clipped_lo - owned_global_lo + 1;
     local_hi = clipped_hi - owned_global_lo + 1;
@@ -98,31 +101,29 @@ bool FaceBC::clip_to_local(int g_lo, int g_hi, const MPIManager& mpi,
 // apply — main dispatch
 // ============================================================
 
-void FaceBC::apply(Fields& f, const Grid& g, const SimConfig& cfg,
-                   const MPIManager& mpi, double dt) const {
-    if (!owns_face(mpi))
-        return;
+void FaceBC::Apply(Fields& f, const Grid& g, const SimConfig& cfg, const MPIManager& mpi,
+                   double dt) const {
+    if (!OwnsFace(mpi)) return;
 
-    auto [face_lo, face_hi] = face_global_range(cfg);
+    auto [face_lo, face_hi] = FaceGlobalRange(cfg);
 
     for (const BCSegment& seg : segments_) {
         const int g_lo = (seg.global_lo < 0) ? face_lo : seg.global_lo;
         const int g_hi = (seg.global_hi < 0) ? face_hi : seg.global_hi;
 
         int local_lo, local_hi;
-        if (!clip_to_local(g_lo, g_hi, mpi, local_lo, local_hi))
-            continue;
+        if (!ClipToLocal(g_lo, g_hi, mpi, local_lo, local_hi)) continue;
 
         // Corner policy for M_LO face (see Solver::advance() for ordering):
         // l=1 corners are owned by the L_LO BC on l-lo boundary ranks.
         // l=local_L corners are owned by the L_HI BC on l-hi boundary ranks.
         if (face_ == Face::M_LO) {
-            if (mpi.is_l_lo_boundary()) local_lo = std::max(local_lo, 2);
-            if (mpi.is_l_hi_boundary()) local_hi = std::min(local_hi, mpi.local_L - 1);
+            if (mpi.IsLLoBoundary()) local_lo = std::max(local_lo, 2);
+            if (mpi.IsLHiBoundary()) local_hi = std::min(local_hi, mpi.local_L - 1);
             if (local_lo > local_hi) continue;
         }
 
-        BCContext ctx{ f, g, cfg, mpi, dt, local_lo, local_hi };
-        seg.bc->apply(ctx);
+        BCContext ctx{.fields=f, .grid=g, .cfg=cfg, .mpi=mpi, .dt=dt, .local_lo=local_lo, .local_hi=local_hi};
+        seg.bc->Apply(ctx);
     }
 }

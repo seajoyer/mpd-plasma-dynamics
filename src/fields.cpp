@@ -27,7 +27,7 @@ Fields::Fields(int r, int c, bool with_prev)
 
 // ---- initialisation ----------------------------------------------------
 
-void Fields::init_physical(const SimConfig& cfg,
+void Fields::InitPhysical(const SimConfig& cfg,
                              const Grid& grid, int l_start) {
     const double gamma = cfg.gamma;
     const double beta  = cfg.beta;
@@ -62,7 +62,7 @@ void Fields::init_physical(const SimConfig& cfg,
     }
 }
 
-void Fields::init_conservative(const Grid& grid) {
+void Fields::InitConservative(const Grid& grid) {
     // Interior cells only: ghost cells have undefined physical values at init.
     #pragma omp parallel for collapse(2)
     for (int l = 1; l < rows - 1; ++l) {
@@ -81,7 +81,7 @@ void Fields::init_conservative(const Grid& grid) {
 
 // ---- per-step helpers --------------------------------------------------
 
-void Fields::save_prev() {
+void Fields::SavePrev() {
     if (!has_prev) return;
 
     #pragma omp parallel for collapse(2)
@@ -98,7 +98,7 @@ void Fields::save_prev() {
     }
 }
 
-void Fields::update_physical_from_u(const Grid& grid, const SimConfig& cfg,
+void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
                                       int l_lo, int l_hi,
                                       int m_lo, int m_hi) {
     const double gamma = cfg.gamma;
@@ -124,7 +124,7 @@ void Fields::update_physical_from_u(const Grid& grid, const SimConfig& cfg,
     }
 }
 
-void Fields::copy_u_to_u0() {
+void Fields::CopyUToU0() {
     #pragma omp parallel for collapse(2)
     for (int l = 0; l < rows; ++l) {
         for (int m = 0; m < cols; ++m) {

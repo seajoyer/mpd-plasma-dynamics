@@ -48,20 +48,20 @@ public:
     /// Set initial conditions on physical arrays for interior cells
     /// [1..local_L][1..local_M].  Ghost cells are left uninitialised; they
     /// will be filled by the first ghost exchange in Solver::advance().
-    void init_physical(const SimConfig& cfg, const Grid& grid, int l_start);
+    void InitPhysical(const SimConfig& cfg, const Grid& grid, int l_start);
 
     /// Compute conservative arrays u0_* from the already-set physical arrays.
-    void init_conservative(const Grid& grid);
+    void InitConservative(const Grid& grid);
 
     // ---- per-step helpers ----
 
     /// Copy current physical arrays into the prev snapshot.
-    void save_prev();
+    void SavePrev();
 
     /// Update physical vars from u_* for a range of local indices (inclusive).
-    void update_physical_from_u(const Grid& grid, const SimConfig& cfg,
+    void UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
                                  int l_lo, int l_hi, int m_lo, int m_hi);
 
     /// Copy u_* → u0_* for all cells (including ghosts).
-    void copy_u_to_u0();
+    void CopyUToU0();
 };
