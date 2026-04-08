@@ -2,9 +2,7 @@
 .cache
 *.log
 .envrc
-build/
-results/
-flake.lock
-/output/
-log/
-hw_info.sh
+build/*
+results/*
+output/*
+log/*

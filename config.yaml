@@ -1,0 +1,188 @@
+physics:
+  gamma: 1.67
+  beta:  0.05
+  H_z0:  0.25
+
+time:
+  T:  4.0
+  dt: 0.00001
+
+adaptive_dt:
+  enabled:       true
+  cfl_number:    0.45
+  growth_factor: 1.10
+  dt_min:        1.0e-9
+  dt_max:        5.0e-5
+
+convergence:
+  threshold:       0.0
+  check_frequency: 100
+
+output:
+  directory: output
+  run_name:  run
+  vtk_step:  5000
+
+parallel:
+  openmp_threads: 0
+  mpi_dims_l: 0
+  mpi_dims_m: 0
+
+grid:
+  L_max_global: 800
+  M_max:        400
+
+# ── Geometry ────────────────────────────────────────────────────────────────
+# `type` must match a name registered in register_all_geometries().
+#
+# Built-in types:
+#   short_cathode_parabolic
+#   short_cathode_cosine
+#
+geometry:
+  type: short_cathode_cosine
+
+# ── Boundary conditions ─────────────────────────────────────────────────────
+#
+# Each face (l_lo, l_hi, m_lo, m_hi) is a sequence of segments.
+# Segments are applied in order; together they should cover the full face.
+#
+# Segment fields
+# ──────────────
+#   range       (optional)  [global_lo, global_hi] along the free axis.
+#                           Negative value = sentinel for face start/end.
+#                           Omit entirely  = full face (same as [-1, -1]).
+#
+#   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
+#               (all optional, default = neumann)
+#               A condition specification for that physical field.
+#
+# Condition syntax
+# ────────────────
+#   neumann           Zero-gradient: copy from the first interior cell.
+#
+#   { dirichlet: V }  Fix to the constant value V.
+#   — or verbose form:
+#   { type: dirichlet, value: V }
+#
+#   wall_tangent      Derive the radial component from the wall-tangent
+#                     condition: v_r = v_z * r_z  or  H_r = H_z * r_z.
+#                     Valid only for v_r and H_r on M_LO / M_HI faces.
+#
+#   axis_lf           One-sided Lax–Friedrichs update for the axis of
+#                     symmetry.  Valid only for rho / v_z / e / H_z on
+#                     the M_LO face.  The corresponding conserved variable
+#                     is written directly; physical reconstruction happens
+#                     at the end of each time step automatically.
+#
+#   hphi_r0_over_r    Free-vortex inlet profile for H_phi:
+#                       H_phi = r_0 / r
+#                     where r_0 = (r_inner(0) + r_outer(0)) / 2.
+#                     Enforces H_phi · r = r_0 = const across the face,
+#                     which is the correct current-free azimuthal field
+#                     profile (no azimuthal current at inlet / outlet).
+#                     Valid only for H_phi.
+#
+# Free-axis convention
+# ─────────────────────
+#   l_lo / l_hi faces  →  free axis is m  (range values are global m indices)
+#   m_lo / m_hi faces  →  free axis is l  (range values are global l indices)
+#
+boundary_conditions:
+
+  l_lo:
+    - rho:   neumann
+      v_z:   { dirichlet: 0.0 }
+      v_r:   neumann
+      v_phi: neumann
+      e:     neumann
+      H_z:   { dirichlet: 0.25 }
+      H_r:   { dirichlet: 0.0 }
+      H_phi: hphi_r0_over_r        # H_phi = r_0 / r  →  H_phi·r = r_0 = const
+
+  l_hi:
+    - rho:   neumann
+      v_z:   neumann
+      v_r:   neumann
+      v_phi: neumann
+      e:     neumann
+      H_z:   neumann
+      H_r:   neumann
+      H_phi: neumann
+
+  m_hi:
+    - rho:   neumann
+      v_z:   neumann
+      v_r:   wall_tangent         # v_r = v_z * r_z
+      v_phi: neumann
+      e:     neumann
+      H_z:   neumann
+      H_r:   wall_tangent         # H_r = H_z * r_z
+      H_phi: neumann
+
+  m_lo:
+    - range: [0, 236]
+      rho:   neumann
+      v_z:   neumann
+      v_r:   wall_tangent
+      v_phi: neumann
+      e:     neumann
+      H_z:   neumann
+      H_r:   wall_tangent
+      H_phi: neumann
+
+    - range: [237, 260]
+      rho:   { dirichlet: 1.0 }
+      v_z:   neumann
+      v_r:   neumann
+      v_phi: { dirichlet: 0.0 }
+      e:     { dirichlet: 0.0373 }
+      H_z:   { dirichlet: 0.25 }
+      H_r:   wall_tangent
+      H_phi: neumann
+
+    - range: [261, -1]
+      rho:   axis_lf
+      v_z:   axis_lf
+      v_r:   { dirichlet: 0.0 }
+      v_phi: { dirichlet: 0.0 }
+      e:     axis_lf
+      H_z:   axis_lf
+      H_r:   { dirichlet: 0.0 }
+      H_phi: { dirichlet: 0.0 }
+
+# ── Recipe: mixed inlet strip ────────────────────────────────────────────
+# To inject a different condition over part of the inflow face, split l_lo
+# into multiple segments (uncomment and adjust values):
+#
+# boundary_conditions:
+#   l_lo:
+#     - range: [-1, 99]          # m = 0..99  — standard inflow
+#       rho:   { dirichlet: 1.0 }
+#       v_z:   neumann
+#       v_r:   { dirichlet: 0.0 }
+#       v_phi: { dirichlet: 0.0 }
+#       e:     { dirichlet: 0.0373 }
+#       H_z:   { dirichlet: 0.25 }
+#       H_r:   { dirichlet: 0.0 }
+#       H_phi: hphi_r0_over_r
+#
+#     - range: [100, 200]        # m = 100..200 — denser injection strip
+#       rho:   { dirichlet: 1.5 }
+#       v_z:   { dirichlet: 0.15 }
+#       v_r:   { dirichlet: 0.0 }
+#       v_phi: { dirichlet: 0.0 }
+#       e:     { dirichlet: 0.0373 }
+#       H_z:   { dirichlet: 0.25 }
+#       H_r:   { dirichlet: 0.0 }
+#       H_phi: hphi_r0_over_r
+#
+#     - range: [201, -1]         # m = 201..end — standard inflow
+#       rho:   { dirichlet: 1.0 }
+#       v_z:   neumann
+#       v_r:   { dirichlet: 0.0 }
+#       v_phi: { dirichlet: 0.0 }
+#       e:     { dirichlet: 0.0373 }
+#       H_z:   { dirichlet: 0.25 }
+#       H_r:   { dirichlet: 0.0 }
+#       H_phi: hphi_r0_over_r

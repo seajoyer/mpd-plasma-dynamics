@@ -24,16 +24,15 @@
           nativeBuildInputs = with pkgs; [
             cmake
             ninja
-            clang-tools   # clangd, clang-format, etc. â†’ nativeBuildInputs
-          ];
-
-          buildInputs = with pkgs; [
-            # Runtime / link-time dependencies
+            libcxx
+            libgcc
+            
             openmpi
-            llvmPackages_latest.openmp   # libomp
-            llvmPackages_latest.libcxx   # libc++ (already pulled in by clangStdenv, but explicit is fine)
-            clang                 # compiler itself (sometimes needed explicitly)
-            lldb
+            llvmPackages_latest.openmp
+            
+            vtk
+            clang-tools
+            yaml-cpp
             gdb
           ];
 

@@ -1,44 +1,49 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(NAME mpd-plasma-dynamics)
-project(${NAME} LANGUAGES C CXX)
+project(mpd-plasma-dynamics LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(FETCHCONTENT_QUIET ON)
+set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE ALWAYS)
 
-find_package(MPI REQUIRED COMPONENTS CXX)
+include(FetchContent)
+include(cmake/Dependencies.cmake)
 
-find_package(OpenMP REQUIRED COMPONENTS CXX)
-
-# Create executable
-add_executable(${NAME}
+add_executable(${PROJECT_NAME}
+    # Core
     src/main.cpp
-    src/memory.cpp
-    src/geometry.cpp
-    src/physics.cpp
-    src/mpi_comm.cpp
-    src/output/write_vtk.cpp
-    src/output/write_plt.cpp
-    src/output/write_results.cpp
-    src/integrals.cpp
-    src/boundary.cpp
+    src/array2d.cpp
+    src/config.cpp
+    src/mpi_manager.cpp
+    src/grid.cpp
+    src/fields.cpp
+    src/diagnostics.cpp
+    src/io_manager.cpp
     src/solver.cpp
+
+    # BC + geometry framework
+    src/face_bc.cpp
+    src/geometry_registry.cpp
+
+    # BC implementation
+    src/bcs/per_field_bc.cpp
+
+    # Built-in geometry implementations
+    src/geometries/short_cathode_parabolic.cpp
+    src/geometries/short_cathode_cosine.cpp
 )
 
-target_include_directories(${NAME}
+target_include_directories(${PROJECT_NAME} PRIVATE src include)
+
+target_link_libraries(${PROJECT_NAME}
     PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-)
-
-target_link_libraries(${NAME} PRIVATE 
-    MPI::MPI_CXX 
-    OpenMP::OpenMP_CXX
-)
-
-target_compile_options(${NAME} PRIVATE 
-    -Wall -Wextra -Wpedantic -O3
+        MPI::MPI_CXX
+        OpenMP::OpenMP_CXX
+        yaml-cpp::yaml-cpp
+        VTK::IOLegacy
 )
 
 message(STATUS "Build type          : ${CMAKE_BUILD_TYPE}")
@@ -49,3 +54,5 @@ message(STATUS "MPI compile flags   : ${MPI_CXX_COMPILE_OPTIONS}")
 message(STATUS "MPI include path    : ${MPI_CXX_INCLUDE_DIRS}")
 message(STATUS "MPI link flags      : ${MPI_CXX_LINK_FLAGS}")
 message(STATUS "MPI libraries       : ${MPI_CXX_LIBRARIES}")
+message(STATUS "VTK version         : ${VTK_VERSION}")
+message(STATUS "yaml-cpp version    : ${yaml-cpp_VERSION}")
