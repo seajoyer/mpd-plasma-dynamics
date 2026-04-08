@@ -4,15 +4,15 @@ physics:
   H_z0:  0.25
 
 time:
-  T:  3.0
-  dt: 0.00002
+  T:  4.0
+  dt: 0.00001
 
 adaptive_dt:
-  enabled:       false
+  enabled:       true
   cfl_number:    0.45
   growth_factor: 1.10
   dt_min:        1.0e-9
-  dt_max:        1.0e-5
+  dt_max:        5.0e-5
 
 convergence:
   threshold:       0.0
@@ -90,25 +90,16 @@ geometry:
 #
 boundary_conditions:
 
-  # ── Inflow at z = 0 ─────────────────────────────────────────────────────
-  # Density and transverse fields are fixed; v_z is taken from the adjacent
-  # interior cell to keep the inflow mass flux self-consistent (Neumann on
-  # v_z is the natural choice for a subsonic inlet).
-  # H_phi uses the free-vortex profile H_phi = r_0 / r so that H_phi · r
-  # is uniform across the inlet, matching the initial condition and
-  # enforcing a current-free azimuthal field at the boundary.
   l_lo:
-    - rho:   { dirichlet: 1.0 }
-      v_z:   neumann              # copied from l=2 → mass-flux consistent
-      v_r:   { dirichlet: 0.0 }
-      v_phi: { dirichlet: 0.0 }
-      e:     { dirichlet: 0.0373 } # beta / (2*(gamma-1)) = 0.05 / (2*0.67)
-      H_z:   { dirichlet: 0.25 }   # = H_z0
+    - rho:   neumann
+      v_z:   { dirichlet: 0.0 }
+      v_r:   neumann
+      v_phi: neumann
+      e:     neumann
+      H_z:   { dirichlet: 0.25 }
       H_r:   { dirichlet: 0.0 }
       H_phi: hphi_r0_over_r        # H_phi = r_0 / r  →  H_phi·r = r_0 = const
 
-  # ── Outflow at z = L ────────────────────────────────────────────────────
-  # Zero-gradient (Neumann) for all fields — standard supersonic/outflow BC.
   l_hi:
     - rho:   neumann
       v_z:   neumann
@@ -119,43 +110,37 @@ boundary_conditions:
       H_r:   neumann
       H_phi: neumann
 
-  # ── Outer wall (anode) ──────────────────────────────────────────────────
-  # Scalars: zero-gradient.  Radial components: wall-tangent condition.
   m_hi:
     - rho:   neumann
       v_z:   neumann
-      v_r:   wall_tangent         # v_r = v_z * r_z  (tangential flow)
+      v_r:   wall_tangent         # v_r = v_z * r_z
       v_phi: neumann
       e:     neumann
       H_z:   neumann
       H_r:   wall_tangent         # H_r = H_z * r_z
       H_phi: neumann
 
-  # ── Inner boundary ──────────────────────────────────────────────────────
-  # Two segments splitting at the cathode-tip / axis transition:
-  #
-  #   [0, 260]   Solid cathode / nozzle wall  (tangential-flow wall BC)
-  #   [261, end] Open axis of symmetry        (half-stencil Lax–Friedrichs)
-  #
-  # Adjust the split index to move the nozzle/axis transition without
-  # touching any C++ source.  With L_max_global=800 and dz=1/800,
-  # global l=260 → z=0.325, which coincides with the end of the cosine
-  # transition in short_cathode_cosine geometry.
   m_lo:
-    # ---- Solid inner wall (cathode / electrode) ---
-    - range: [0, 260]
+    - range: [0, 236]
       rho:   neumann
       v_z:   neumann
       v_r:   wall_tangent
-      v_phi: { dirichlet: 0.0 }
+      v_phi: neumann
       e:     neumann
       H_z:   neumann
       H_r:   wall_tangent
       H_phi: neumann
 
-    # ---- Axis of symmetry (downstream of cathode tip) ---
-    # rho / v_z / e / H_z: one-sided Lax–Friedrichs stencil (axis_lf).
-    # Transverse / azimuthal components: enforced to zero (symmetry).
+    - range: [237, 260]
+      rho:   { dirichlet: 1.0 }
+      v_z:   neumann
+      v_r:   neumann
+      v_phi: { dirichlet: 0.0 }
+      e:     { dirichlet: 0.0373 }
+      H_z:   { dirichlet: 0.25 }
+      H_r:   wall_tangent
+      H_phi: neumann
+
     - range: [261, -1]
       rho:   axis_lf
       v_z:   axis_lf
