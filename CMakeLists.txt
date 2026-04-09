@@ -35,9 +35,8 @@ add_executable(${PROJECT_NAME}
     src/geometries/short_cathode_parabolic.cpp
     src/geometries/short_cathode_cosine.cpp
 
-    # IC framework + built-in implementations
+    # IC framework + built-in implementation
     src/initial_condition_registry.cpp
-    src/ics/uniform_mhd.cpp
     src/ics/expression_ic.cpp
 )
 
@@ -56,6 +55,7 @@ target_link_libraries(${PROJECT_NAME}
         exprtk::exprtk
 )
 
+# exprtk is a large header — restrict optimisation to keep compile times sane.
 set_source_files_properties(src/ics/expression_ic.cpp
     PROPERTIES COMPILE_FLAGS "-O1"
 )

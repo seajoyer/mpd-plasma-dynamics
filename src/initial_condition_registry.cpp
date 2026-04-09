@@ -5,7 +5,6 @@
 #include <stdexcept>
 
 #include "ics/expression_ic.hpp"
-#include "ics/uniform_mhd.hpp"
 
 // ============================================================
 // InitialConditionRegistry singleton
@@ -22,14 +21,14 @@ void InitialConditionRegistry::Register(std::string name, Factory factory) {
 
 auto InitialConditionRegistry::Create(const std::string& type,
                                       const YAML::Node& params) const
-    -> std::unique_ptr<IInitialCondition> {
+    -> std::unique_ptr<IInitialCondition>
+{
     auto it = factories_.find(type);
     if (it == factories_.end()) {
         throw std::runtime_error(
-            "InitialConditionRegistry: unknown IC type '" + type +
-            "'.\n"
-            "  Did you forget to call RegisterAllInitialConditions(), or "
-            "mistype the name in config.yaml?");
+            "InitialConditionRegistry: unknown IC type '" + type + "'.\n"
+            "  The only built-in type is 'expression'.\n"
+            "  Check for a typo in config.yaml under initial_conditions.type.");
     }
     return it->second(params);
 }
@@ -41,20 +40,13 @@ auto InitialConditionRegistry::Create(const std::string& type,
 void RegisterAllInitialConditions() {
     InitialConditionRegistry& reg = InitialConditionRegistry::Instance();
 
-    reg.Register("uniform_mhd",
-                 [](const YAML::Node& p) { return std::make_unique<UniformMhdIC>(p); });
-
     reg.Register("expression",
                  [](const YAML::Node& p) { return std::make_unique<ExpressionIC>(p); });
 
     // ----------------------------------------------------------------
-    // Add new IC types here by following the pattern above.
-    // The factory receives the YAML::Node from the `params` sub-node
-    // in config.yaml (null node if the key is absent).
-    //
-    // Example:
-    //   reg.Register("radial_profile", [](const YAML::Node& p) {
-    //       return std::make_unique<RadialProfileIC>(p);
-    //   });
+    // To add a custom IC type:
+    //   1. Subclass IInitialCondition (see include/iinitial_condition.hpp).
+    //   2. Add a Register() call here following the pattern above.
+    //   3. Reference the name in config.yaml under initial_conditions.type.
     // ----------------------------------------------------------------
 }

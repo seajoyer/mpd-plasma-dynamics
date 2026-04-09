@@ -32,63 +32,65 @@ grid:
   L_max: 800
   M_max: 400
 
-# ── Geometry ────────────────────────────────────────────────────────────────
-# `type` must match a name registered in register_all_geometries().
+# ── Geometry ─────────────────────────────────────────────────────────────────
+#
+# type must match a name registered in register_all_geometries().
 #
 # Built-in types:
-#   short_cathode_parabolic
-#   short_cathode_cosine
+#   short_cathode_cosine     C¹ cosine-smoothed throat transition (recommended)
+#   short_cathode_parabolic  Piecewise-parabolic throat (legacy)
 #
 geometry:
   type: short_cathode_cosine
 
-# ── Initial conditions ───────────────────────────────────────────────────────
+# ── Initial conditions ────────────────────────────────────────────────────────
 #
-# `type` must match a name registered in RegisterAllInitialConditions().
+# type must match a name registered in RegisterAllInitialConditions().
+# The only built-in type is 'expression'.
 #
-# Built-in types
-# ──────────────
-#   uniform_mhd   Preset-based IC with named condition types
-#                 (from_physics, wall_tangent, linear_free_vortex, …).
-#                 Kept for backward compatibility.
+# ── Expression IC ─────────────────────────────────────────────────────────────
 #
-#   expression    Expression-based IC.  Each field is a free math expression
-#                 evaluated cell-by-cell.  See below for full documentation.
+# Each of the eight primary physical fields is specified as a mathematical
+# expression evaluated cell-by-cell.  Derived fields (p, P) are computed
+# automatically from the primaries after all eight have been assigned.
 #
-# ── Expression IC ────────────────────────────────────────────────────────────
+# params layout
+# ─────────────
+#   vars:               (optional)
+#     <name>: <double>  User-defined named constants, visible in all expressions.
+#                       Names must not shadow built-in symbols (see below).
 #
-# Available symbols in every expression
-# ──────────────────────────────────────
-#   Physics constants (set from the [physics] block above)
-#     gamma      adiabatic index
-#     beta       plasma beta
-#     H_z0       reference axial magnetic field
-#     r_0        mid-channel radius at z=0: (r_inner(0) + r_outer(0)) / 2
+#   rho / v_z / v_r / v_phi / H_z / H_r / H_phi / e
+#     (all optional — defaults reproduce the standard MHD quiescent state)
+#     Each field is a scalar: either a plain number or a quoted expression string.
 #
-#   Spatial variables (cell-local)
-#     z          axial coordinate   [= l_global * dz]
-#     r          radial coordinate  [= grid.r[l][m]]
-#     r_z        dr/dz skew metric  [= grid.r_z[l][m]]
+# Built-in symbols available in every expression
+# ───────────────────────────────────────────────
+#   Physics constants  (from the [physics] block)
+#     gamma   beta   H_z0   r_0
 #
-#   Mathematical constant
-#     pi         3.14159…
+#   Spatial variables  (cell-local, read-only)
+#     z       axial coordinate  [l_global × dz]
+#     r       radial coordinate [grid.r[l][m]]
+#     r_z     dr/dz skew metric [grid.r_z[l][m]]
+#
+#   Math constant
+#     pi
 #
 #   Standard functions
-#     sin, cos, tan, asin, acos, atan, atan2
-#     exp, log, log2, log10, sqrt, pow, abs, sign, min, max, clamp
-#     (Use exp(1) for Euler's number; 'e' is reserved for specific energy.)
+#     sin  cos  tan  asin  acos  atan  atan2
+#     exp  log  log2 log10 sqrt  pow   abs   sign
+#     min  max  clamp
+#     (Use exp(1) for Euler's number — 'e' is reserved for specific energy.)
 #
-#   Previously-assigned field values (see evaluation order below)
-#     rho, v_z, v_r, v_phi, H_z, H_r, H_phi, e
+#   Previously-assigned field values  (evaluation order below)
+#     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
 #
-# Evaluation order: rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
+# Evaluation order:  rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
 #   Each expression may reference fields earlier in this sequence.
 #
-# YAML quoting
-#   Quote any expression that contains YAML-special characters: * { } : [ ]
-#   Plain numbers (1.0, 0.25) and bare identifiers (H_z0) need no quotes.
-#
 # Defaults when a field key is absent
+# ────────────────────────────────────
 #   rho:   1.0
 #   v_z:   0.0
 #   v_r:   0.0
@@ -97,6 +99,10 @@ geometry:
 #   H_r:   "H_z * r_z"
 #   H_phi: "(1 - 0.9 * z) * r_0 / r"
 #   e:     "beta / (2 * (gamma - 1))"
+#
+# YAML quoting
+#   Quote expressions containing YAML-special characters: * { } : [ ]
+#   Plain numbers and bare identifiers need no quotes.
 #
 initial_conditions:
   type: expression
@@ -110,7 +116,7 @@ initial_conditions:
     H_phi: "(1 - 0.9 * z) * r_0 / r"
     e:     "beta / (2 * (gamma - 1))"
 
-# ── Boundary conditions ─────────────────────────────────────────────────────
+# ── Boundary conditions ───────────────────────────────────────────────────────
 #
 # Each face (l_lo, l_hi, m_lo, m_hi) is a sequence of segments.
 # Segments are applied in order; together they should cover the full face.
@@ -123,38 +129,27 @@ initial_conditions:
 #
 #   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
 #               (all optional, default = neumann)
-#               A condition specification for that physical field.
 #
 # Condition syntax
 # ────────────────
 #   neumann           Zero-gradient: copy from the first interior cell.
 #
 #   { dirichlet: V }  Fix to the constant value V.
-#   — or verbose form:
-#   { type: dirichlet, value: V }
+#   { type: dirichlet, value: V }   (verbose form)
 #
-#   wall_tangent      Derive the radial component from the wall-tangent
-#                     condition: v_r = v_z * r_z  or  H_r = H_z * r_z.
+#   wall_tangent      v_r = v_z * r_z  or  H_r = H_z * r_z.
 #                     Valid only for v_r and H_r on M_LO / M_HI faces.
 #
-#   axis_lf           One-sided Lax–Friedrichs update for the axis of
-#                     symmetry.  Valid only for rho / v_z / e / H_z on
-#                     the M_LO face.  The corresponding conserved variable
-#                     is written directly; physical reconstruction happens
-#                     at the end of each time step automatically.
+#   axis_lf           One-sided Lax–Friedrichs update for the axis of symmetry.
+#                     Valid only for rho / v_z / e / H_z on the M_LO face.
 #
-#   hphi_r0_over_r    Free-vortex inlet profile for H_phi:
-#                       H_phi = r_0 / r
-#                     where r_0 = (r_inner(0) + r_outer(0)) / 2.
-#                     Enforces H_phi · r = r_0 = const across the face,
-#                     which is the correct current-free azimuthal field
-#                     profile (no azimuthal current at inlet / outlet).
-#                     Valid only for H_phi.
+#   hphi_r0_over_r    Free-vortex inlet profile: H_phi = r_0 / r.
+#                     Enforces H_phi · r = const.  Valid only for H_phi.
 #
 # Free-axis convention
 # ─────────────────────
-#   l_lo / l_hi faces  →  free axis is m  (range values are global m indices)
-#   m_lo / m_hi faces  →  free axis is l  (range values are global l indices)
+#   l_lo / l_hi faces  →  free axis is m  (range = global m indices)
+#   m_lo / m_hi faces  →  free axis is l  (range = global l indices)
 #
 boundary_conditions:
 
