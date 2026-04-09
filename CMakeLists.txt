@@ -35,8 +35,7 @@ add_executable(${PROJECT_NAME}
     src/geometries/short_cathode_parabolic.cpp
     src/geometries/short_cathode_cosine.cpp
 
-    # IC framework + built-in implementation
-    src/initial_condition_registry.cpp
+    # IC implementation
     src/ics/expression_ic.cpp
 )
 

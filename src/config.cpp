@@ -119,13 +119,13 @@ static auto ParseFace(const YAML::Node& node) -> BCFaceConfig {
         }
 
         // Per-field conditions (all optional; absent = Neumann)
-        seg.rho = ParseFieldCond(item["rho"]);
-        seg.v_z = ParseFieldCond(item["v_z"]);
-        seg.v_r = ParseFieldCond(item["v_r"]);
+        seg.rho   = ParseFieldCond(item["rho"]);
+        seg.v_z   = ParseFieldCond(item["v_z"]);
+        seg.v_r   = ParseFieldCond(item["v_r"]);
         seg.v_phi = ParseFieldCond(item["v_phi"]);
-        seg.e = ParseFieldCond(item["e"]);
-        seg.H_z = ParseFieldCond(item["H_z"]);
-        seg.H_r = ParseFieldCond(item["H_r"]);
+        seg.e     = ParseFieldCond(item["e"]);
+        seg.H_z   = ParseFieldCond(item["H_z"]);
+        seg.H_r   = ParseFieldCond(item["H_r"]);
         seg.H_phi = ParseFieldCond(item["H_phi"]);
 
         face.segments.push_back(std::move(seg));
@@ -150,23 +150,23 @@ void SimConfig::Load(const std::string& path) {
     // ---- physics -----------------------------------------------------------
     if (auto n = cfg["physics"]) {
         if (n["gamma"]) gamma = n["gamma"].as<double>();
-        if (n["beta"]) beta = n["beta"].as<double>();
-        if (n["H_z0"]) H_z0 = n["H_z0"].as<double>();
+        if (n["beta"])  beta  = n["beta"].as<double>();
+        if (n["H_z0"])  H_z0  = n["H_z0"].as<double>();
     }
 
     // ---- time --------------------------------------------------------------
     if (auto n = cfg["time"]) {
-        if (n["T"]) T = n["T"].as<double>();
+        if (n["T"])  T  = n["T"].as<double>();
         if (n["dt"]) dt = n["dt"].as<double>();
     }
 
     // ---- adaptive time step ------------------------------------------------
     if (auto n = cfg["adaptive_dt"]) {
-        if (n["enabled"]) adaptive_dt = n["enabled"].as<bool>();
-        if (n["cfl_number"]) cfl_number = n["cfl_number"].as<double>();
+        if (n["enabled"])       adaptive_dt      = n["enabled"].as<bool>();
+        if (n["cfl_number"])    cfl_number       = n["cfl_number"].as<double>();
         if (n["growth_factor"]) dt_growth_factor = n["growth_factor"].as<double>();
-        if (n["dt_min"]) dt_min = n["dt_min"].as<double>();
-        if (n["dt_max"]) dt_max = n["dt_max"].as<double>();
+        if (n["dt_min"])        dt_min           = n["dt_min"].as<double>();
+        if (n["dt_max"])        dt_max           = n["dt_max"].as<double>();
     }
 
     // ---- grid --------------------------------------------------------------
@@ -177,22 +177,22 @@ void SimConfig::Load(const std::string& path) {
 
     // ---- convergence -------------------------------------------------------
     if (auto n = cfg["convergence"]) {
-        if (n["threshold"]) convergence_threshold = n["threshold"].as<double>();
-        if (n["check_frequency"]) check_frequency = n["check_frequency"].as<int>();
+        if (n["threshold"])       convergence_threshold = n["threshold"].as<double>();
+        if (n["check_frequency"]) check_frequency       = n["check_frequency"].as<int>();
     }
 
     // ---- output ------------------------------------------------------------
     if (auto n = cfg["output"]) {
         if (n["directory"]) output_dir = n["directory"].as<std::string>();
-        if (n["run_name"]) run_name = n["run_name"].as<std::string>();
-        if (n["vtk_step"]) vtk_step = n["vtk_step"].as<int>();
+        if (n["run_name"])  run_name   = n["run_name"].as<std::string>();
+        if (n["vtk_step"])  vtk_step   = n["vtk_step"].as<int>();
     }
 
     // ---- parallelism -------------------------------------------------------
     if (auto n = cfg["parallel"]) {
         if (n["openmp_threads"]) openmp_threads = n["openmp_threads"].as<int>();
-        if (n["mpi_dims_l"]) mpi_dims_l = n["mpi_dims_l"].as<int>();
-        if (n["mpi_dims_m"]) mpi_dims_m = n["mpi_dims_m"].as<int>();
+        if (n["mpi_dims_l"])     mpi_dims_l     = n["mpi_dims_l"].as<int>();
+        if (n["mpi_dims_m"])     mpi_dims_m     = n["mpi_dims_m"].as<int>();
     }
 
     // ---- geometry ----------------------------------------------------------
@@ -206,13 +206,33 @@ void SimConfig::Load(const std::string& path) {
     }
 
     // ---- initial conditions ------------------------------------------------
+    // The entire node is serialised and forwarded to ExpressionIC, which
+    // looks up `vars`, `rho`, `v_z`, … at the top level of the node.
     if (auto n = cfg["initial_conditions"]) {
-        if (n["type"]) initial_conditions.type = n["type"].as<std::string>();
-        if (n["params"]) {
-            std::ostringstream oss;
-            oss << n["params"];
-            initial_conditions.params_yaml = oss.str();
+        if (n["type"]) {
+            throw std::runtime_error(
+                "config: 'initial_conditions.type' is no longer supported — "
+                "ExpressionIC is always used.\n"
+                "  Remove the 'type' key.  Field expressions now live directly\n"
+                "  under 'initial_conditions:', not under 'initial_conditions.params:'.\n"
+                "  Example:\n"
+                "    initial_conditions:\n"
+                "      rho: 1.0\n"
+                "      v_z: 0.1");
         }
+        if (n["params"]) {
+            throw std::runtime_error(
+                "config: 'initial_conditions.params' is no longer supported.\n"
+                "  Move field expressions one level up, directly under "
+                "'initial_conditions:'.\n"
+                "  Example:\n"
+                "    initial_conditions:\n"
+                "      rho: 1.0\n"
+                "      v_z: 0.1");
+        }
+        std::ostringstream oss;
+        oss << n;
+        initial_conditions.params_yaml = oss.str();
     }
 
     // ---- boundary conditions -----------------------------------------------

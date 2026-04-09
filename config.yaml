@@ -45,27 +45,15 @@ geometry:
 
 # ── Initial conditions ────────────────────────────────────────────────────────
 #
-# type must match a name registered in RegisterAllInitialConditions().
-# The only built-in type is 'expression'.
+# Fields are specified as mathematical expressions evaluated cell-by-cell.
+# Derived fields (p, P) are computed automatically from the primaries.
 #
-# ── Expression IC ─────────────────────────────────────────────────────────────
+# Omitting a field uses its built-in default (see below).
+# Omitting the entire `initial_conditions` section applies all defaults,
+# producing a standard quiescent MHD state.
 #
-# Each of the eight primary physical fields is specified as a mathematical
-# expression evaluated cell-by-cell.  Derived fields (p, P) are computed
-# automatically from the primaries after all eight have been assigned.
+# ── Available symbols ─────────────────────────────────────────────────────────
 #
-# params layout
-# ─────────────
-#   vars:               (optional)
-#     <name>: <double>  User-defined named constants, visible in all expressions.
-#                       Names must not shadow built-in symbols (see below).
-#
-#   rho / v_z / v_r / v_phi / H_z / H_r / H_phi / e
-#     (all optional — defaults reproduce the standard MHD quiescent state)
-#     Each field is a scalar: either a plain number or a quoted expression string.
-#
-# Built-in symbols available in every expression
-# ───────────────────────────────────────────────
 #   Physics constants  (from the [physics] block)
 #     gamma   beta   H_z0   r_0
 #
@@ -86,11 +74,13 @@ geometry:
 #   Previously-assigned field values  (evaluation order below)
 #     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
 #
-# Evaluation order:  rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
+# ── Evaluation order ─────────────────────────────────────────────────────────
+#
+#   rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
 #   Each expression may reference fields earlier in this sequence.
 #
-# Defaults when a field key is absent
-# ────────────────────────────────────
+# ── Defaults when a field key is absent ──────────────────────────────────────
+#
 #   rho:   1.0
 #   v_z:   0.0
 #   v_r:   0.0
@@ -100,21 +90,32 @@ geometry:
 #   H_phi: "(1 - 0.9 * z) * r_0 / r"
 #   e:     "beta / (2 * (gamma - 1))"
 #
-# YAML quoting
+# ── User-defined constants (vars) ────────────────────────────────────────────
+#
+#   Named scalar constants declared under `vars:` are visible in every field
+#   expression.  Names must not shadow built-in symbols (gamma, beta, H_z0,
+#   r_0, z, r, r_z, pi, rho, v_z, v_r, v_phi, H_z, H_r, H_phi, e).
+#
+#   Example:
+#     initial_conditions:
+#       vars:
+#         amp: 0.8
+#       H_phi: "amp * r_0 / r"
+#
+# ── YAML quoting ─────────────────────────────────────────────────────────────
+#
 #   Quote expressions containing YAML-special characters: * { } : [ ]
 #   Plain numbers and bare identifiers need no quotes.
 #
 initial_conditions:
-  type: expression
-  params:
-    rho:   1.0
-    v_z:   0.1
-    v_r:   0.1
-    v_phi: 0.0
-    H_z:   H_z0
-    H_r:   "H_z * r_z"
-    H_phi: "(1 - 0.9 * z) * r_0 / r"
-    e:     "beta / (2 * (gamma - 1))"
+  rho:   1.0
+  v_z:   0.1
+  v_r:   0.1
+  v_phi: 0.0
+  H_z:   H_z0
+  H_r:   "H_z * r_z"
+  H_phi: "(1 - 0.9 * z) * r_0 / r"
+  e:     "beta / (2 * (gamma - 1))"
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
 #
