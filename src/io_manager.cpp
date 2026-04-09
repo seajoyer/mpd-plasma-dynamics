@@ -242,7 +242,7 @@ void IOManager::WriteVtk(const std::string& filepath) const {
     sg->SetPoints(points);
 
     // ---- helper: add scalar field --------------------------------------
-    auto add_scalar = [&](const char* name, const Array2D& arr) {
+    auto add_scalar = [&](const char* name, const Array2D& arr) -> void {
         auto da = vtkSmartPointer<vtkDoubleArray>::New();
         da->SetName(name);
         da->SetNumberOfTuples(static_cast<vtkIdType>(ni) * nj);
@@ -276,8 +276,6 @@ void IOManager::WriteVtk(const std::string& filepath) const {
     // ---- scalar fields -------------------------------------------------
     add_scalar("Rho", rho_g_);
     add_scalar("Energy", e_g_);
-    add_scalar("Vphi", v_phi_g_);
-    add_scalar("Hphi", H_phi_g_);
 
     // ---- MPI domain decomposition visualisation ------------------------
     // Each cell is coloured by the rank that owns it.  In ParaView, apply
@@ -286,20 +284,6 @@ void IOManager::WriteVtk(const std::string& filepath) const {
     add_scalar("MPI_Rank", rank_g_);
 
     // ---- derived scalars -----------------------------------------------
-    {
-        auto vl = vtkSmartPointer<vtkDoubleArray>::New();
-        vl->SetName("SpeedInPlane");
-        vl->SetNumberOfTuples(static_cast<vtkIdType>(ni) * nj);
-        for (int j = 0; j < nj; ++j) {
-            for (int i = 0; i < ni; ++i) {
-                const int li = std::min(i, L_g - 1);
-                const double v = std::sqrt(v_z_g_[li][j] * v_z_g_[li][j] +
-                                           v_r_g_[li][j] * v_r_g_[li][j]);
-                vl->SetValue(static_cast<vtkIdType>(i + j * ni), v);
-            }
-        }
-        sg->GetPointData()->AddArray(vl);
-    }
     {
         auto hphi_r = vtkSmartPointer<vtkDoubleArray>::New();
         hphi_r->SetName("Hphi_times_r");
