@@ -54,8 +54,12 @@ target_link_libraries(${PROJECT_NAME}
         exprtk::exprtk
 )
 
-# exprtk is a large header — restrict optimisation to keep compile times sane.
-set_source_files_properties(src/ics/expression_ic.cpp
+# Both expression_ic.cpp and per_field_bc.cpp include the large exprtk header.
+# Restrict optimisation on these TUs to keep compile times sane while retaining
+# full optimisation for the hot numerical loops in solver.cpp / fields.cpp.
+set_source_files_properties(
+    src/ics/expression_ic.cpp
+    src/bcs/per_field_bc.cpp
     PROPERTIES COMPILE_FLAGS "-O1"
 )
 

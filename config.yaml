@@ -90,23 +90,6 @@ geometry:
 #   H_phi: "(1 - 0.9 * z) * r_0 / r"
 #   e:     "beta / (2 * (gamma - 1))"
 #
-# ── User-defined constants (vars) ────────────────────────────────────────────
-#
-#   Named scalar constants declared under `vars:` are visible in every field
-#   expression.  Names must not shadow built-in symbols (gamma, beta, H_z0,
-#   r_0, z, r, r_z, pi, rho, v_z, v_r, v_phi, H_z, H_r, H_phi, e).
-#
-#   Example:
-#     initial_conditions:
-#       vars:
-#         amp: 0.8
-#       H_phi: "amp * r_0 / r"
-#
-# ── YAML quoting ─────────────────────────────────────────────────────────────
-#
-#   Quote expressions containing YAML-special characters: * { } : [ ]
-#   Plain numbers and bare identifiers need no quotes.
-#
 initial_conditions:
   rho:   1.0
   v_z:   0.1
@@ -133,19 +116,32 @@ initial_conditions:
 #
 # Condition syntax
 # ────────────────
-#   neumann           Zero-gradient: copy from the first interior cell.
+#   neumann              Zero-gradient: f_bc = f_interior  (offset = 0)
+#   { neumann: G }       Constant-offset: f_bc = f_interior + G
 #
-#   { dirichlet: V }  Fix to the constant value V.
-#   { type: dirichlet, value: V }   (verbose form)
+#   dirichlet            Fix to 0
+#   { dirichlet: V }     Fix to the constant value V
 #
-#   wall_tangent      v_r = v_z * r_z  or  H_r = H_z * r_z.
-#                     Valid only for v_r and H_r on M_LO / M_HI faces.
+#   "expression"         Evaluate a formula at each boundary cell.
+#   { expr: "..." }      All physics constants, grid quantities,
+#                        neighbour values, and previously-evaluated
+#                        boundary values are available as symbols.
+#                        See FieldCondType::Expression documentation
+#                        for the complete symbol table.
 #
-#   axis_lf           One-sided Lax–Friedrichs update for the axis of symmetry.
-#                     Valid only for rho / v_z / e / H_z on the M_LO face.
+#   axis_lf              One-sided Lax–Friedrichs update for the axis of
+#                        symmetry.  Valid only for rho / v_z / e / H_z
+#                        on the M_LO face.
 #
-#   hphi_r0_over_r    Free-vortex inlet profile: H_phi = r_0 / r.
-#                     Enforces H_phi · r = const.  Valid only for H_phi.
+# Expression symbol quick-reference
+# ──────────────────────────────────
+#   Physics:   gamma  beta  H_z0  r_0  dz  dr
+#   Boundary cell:  r  r_z  z
+#   Neighbour cell: r_nb  r_z_nb
+#   Neighbour fields: rho_nb  v_z_nb  v_r_nb  v_phi_nb  e_nb
+#                     H_z_nb  H_r_nb  H_phi_nb
+#   Boundary values (evaluation order, cross-field references):
+#                     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
 #
 # Free-axis convention
 # ─────────────────────
@@ -154,6 +150,7 @@ initial_conditions:
 #
 boundary_conditions:
 
+  # ── Inlet (z = 0) ────────────────────────────────────────────────────────
   l_lo:
     - rho:   neumann
       v_z:   { dirichlet: 0.0 }
@@ -162,8 +159,9 @@ boundary_conditions:
       e:     neumann
       H_z:   { dirichlet: 0.25 }
       H_r:   { dirichlet: 0.0 }
-      H_phi: hphi_r0_over_r        # H_phi = r_0 / r  →  H_phi·r = r_0 = const
+      H_phi: "r_0 / r"
 
+  # ── Outlet (z = L) ───────────────────────────────────────────────────────
   l_hi:
     - rho:   neumann
       v_z:   neumann
@@ -174,25 +172,39 @@ boundary_conditions:
       H_r:   neumann
       H_phi: neumann
 
+  # ── Outer wall (r = r_outer) ─────────────────────────────────────────────
   m_hi:
     - rho:   neumann
       v_z:   neumann
-      v_r:   wall_tangent         # v_r = v_z * r_z
+      v_r:   "v_z * r_z"
       v_phi: neumann
       e:     neumann
       H_z:   neumann
-      H_r:   wall_tangent         # H_r = H_z * r_z
+      H_r:   "H_z * r_z"
       H_phi: neumann
 
+  # ── Inner wall + axis (r = r_inner, then axis of symmetry) ───────────────
+  #
+  # Three segments in l-direction (global l index along the M_LO face):
+  #
+  #   [0, 236]    Solid cathode wall.
+  #               Wall-tangent uses NEIGHBOUR slope (M_LO convention).
+  #
+  #   [237, 260]  Cathode tip / injection region.
+  #               Fixed density, energy, and H_z; wall-tangent for H_r.
+  #
+  #   [261, end]  Axis of symmetry (r → 0).
+  #               Lax–Friedrichs update for rho, v_z, e, H_z.
+  #               All other components are zero by symmetry.
   m_lo:
     - range: [0, 236]
       rho:   neumann
       v_z:   neumann
-      v_r:   wall_tangent
+      v_r:   "v_z_nb * r_z_nb"
       v_phi: neumann
       e:     neumann
       H_z:   neumann
-      H_r:   wall_tangent
+      H_r:   "H_z_nb * r_z_nb"
       H_phi: neumann
 
     - range: [237, 260]
@@ -202,7 +214,7 @@ boundary_conditions:
       v_phi: { dirichlet: 0.0 }
       e:     { dirichlet: 0.0373 }
       H_z:   { dirichlet: 0.25 }
-      H_r:   wall_tangent
+      H_r:   "H_z_nb * r_z_nb"
       H_phi: neumann
 
     - range: [261, -1]

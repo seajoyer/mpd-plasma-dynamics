@@ -19,66 +19,185 @@ void SimConfig::Init() {
 
 // ---- FieldCond parser -------------------------------------------------------
 //
-// Accepts three YAML forms for a single field condition:
+// Accepts the following YAML forms for a single field condition:
 //
-//   neumann                          # short: type name as scalar string
-//   wall_tangent
-//   axis_lf
-//   hphi_r0_over_r
-//   { dirichlet: 1.0 }               # map with implicit value key
-//   { type: dirichlet, value: 1.0 }  # verbose map
+//   Neumann (zero-gradient copy + optional offset):
+//     neumann                         →  Neumann, offset = 0
+//     { neumann: 0.5 }                →  Neumann, offset = 0.5 (f_bc = f_nb + 0.5)
 //
-// Unrecognised keys throw std::runtime_error.
+//   Dirichlet (fixed value, defaults to 0):
+//     dirichlet                       →  Dirichlet, value = 0
+//     { dirichlet: 1.0 }              →  Dirichlet, value = 1.0
+//
+//   Expression (arbitrary formula compiled via exprtk):
+//     "v_z * r_z"                     →  Expression, expr = "v_z * r_z"
+//     "r_0 / r"                       →  Expression, expr = "r_0 / r"
+//     { expr: "v_z_nb * r_z_nb" }     →  Expression, expr = "v_z_nb * r_z_nb"
+//
+//   Axis Lax–Friedrichs (special half-stencil, M_LO only):
+//     axis_lf                         →  AxisLF
+//
+//   Verbose map form (all conditions):
+//     { type: neumann }
+//     { type: neumann, gradient: 0.5 }
+//     { type: dirichlet }
+//     { type: dirichlet, value: 1.0 }
+//     { type: expression, expr: "..." }
+//     { type: axis_lf }
+//
+// Removed presets — helpful errors with migration suggestions:
+//   wall_tangent      → "v_z_nb * r_z_nb"  (M_LO)  /  "v_z * r_z"  (M_HI)
+//   hphi_r0_over_r    → "r_0 / r"
 
 static auto ParseFieldCond(const YAML::Node& n) -> FieldCond {
     if (!n || n.IsNull()) {
-        return {};  // default: Neumann
+        return {};  // default: Neumann with offset 0 (zero-gradient copy)
     }
 
-    // ---- Short scalar form: type name only ----
+    // ---- Scalar form --------------------------------------------------------
     if (n.IsScalar()) {
         const auto s = n.as<std::string>();
-        if (s == "neumann") return {.type = FieldCondType::Neumann};
-        if (s == "wall_tangent") return {.type = FieldCondType::WallTangent};
-        if (s == "axis_lf") return {.type = FieldCondType::AxisLF};
-        if (s == "hphi_r0_over_r") return {.type = FieldCondType::HPhi_r0_over_r};
-        throw std::runtime_error(
-            "config: unknown field condition '" + s +
-            "'.\n"
-            "  Valid scalar types: neumann, wall_tangent, axis_lf, hphi_r0_over_r.\n"
-            "  For a fixed value use: { dirichlet: <value> }");
+
+        if (s == "neumann")   return {.type = FieldCondType::Neumann};
+        if (s == "dirichlet") return {.type = FieldCondType::Dirichlet, .value = 0.0};
+        if (s == "axis_lf")   return {.type = FieldCondType::AxisLF};
+
+        // ---- Removed-preset migration errors --------------------------------
+        if (s == "wall_tangent") {
+            throw std::runtime_error(
+                "config: 'wall_tangent' is no longer a built-in preset.\n"
+                "  Replace it with an expression that encodes the wall-tangent\n"
+                "  condition explicitly:\n"
+                "\n"
+                "    On M_LO (inner wall) — uses interior-neighbour slope:\n"
+                "      v_r: \"v_z_nb * r_z_nb\"\n"
+                "      H_r: \"H_z_nb * r_z_nb\"\n"
+                "\n"
+                "    On M_HI (outer wall) — uses wall-cell slope:\n"
+                "      v_r: \"v_z * r_z\"\n"
+                "      H_r: \"H_z * r_z\"\n"
+                "\n"
+                "  Note: 'v_z' and 'H_z' here refer to the wall-cell values\n"
+                "  (already evaluated earlier in the same cell's update).\n"
+                "  'v_z_nb' / 'H_z_nb' refer to the interior-neighbour cell.");
+        }
+
+        if (s == "hphi_r0_over_r") {
+            throw std::runtime_error(
+                "config: 'hphi_r0_over_r' is no longer a built-in preset.\n"
+                "  Replace it with the equivalent expression:\n"
+                "\n"
+                "    H_phi: \"r_0 / r\"\n"
+                "\n"
+                "  This enforces H_phi * r = r_0 = const (free-vortex / no-current\n"
+                "  azimuthal field profile).");
+        }
+
+        // ---- Any other scalar string → expression ---------------------------
+        // Anything that doesn't match a keyword is treated as a formula.
+        // exprtk will report a clear error at construction time if the string
+        // is not a valid mathematical expression.
+        return {.type = FieldCondType::Expression, .expr_str = s};
     }
 
-    // ---- Map form ----
+    // ---- Map form -----------------------------------------------------------
     if (n.IsMap()) {
-        // Short map: { dirichlet: 1.0 }
-        if (n["dirichlet"]) {
-            return {.type = FieldCondType::Dirichlet,
-                    .value = n["dirichlet"].as<double>()};
+
+        // { neumann: 0.5 }  — short map with offset value
+        if (n["neumann"]) {
+            const auto& v = n["neumann"];
+            if (!v.IsScalar()) {
+                throw std::runtime_error(
+                    "config: 'neumann' offset must be a scalar number "
+                    "(e.g. { neumann: 0.5 })");
+            }
+            return {.type = FieldCondType::Neumann, .value = v.as<double>()};
         }
 
-        // Verbose map: { type: ..., value: ... }
+        // { dirichlet: 1.0 }  — short map with fixed value
+        if (n["dirichlet"]) {
+            const auto& v = n["dirichlet"];
+            if (!v.IsScalar()) {
+                throw std::runtime_error(
+                    "config: 'dirichlet' value must be a scalar number "
+                    "(e.g. { dirichlet: 1.0 })");
+            }
+            return {.type = FieldCondType::Dirichlet, .value = v.as<double>()};
+        }
+
+        // { expr: "..." }  — short expression map
+        if (n["expr"]) {
+            const auto& v = n["expr"];
+            if (!v.IsScalar()) {
+                throw std::runtime_error(
+                    "config: 'expr' value must be a scalar expression string "
+                    "(e.g. { expr: \"v_z * r_z\" })");
+            }
+            return {.type = FieldCondType::Expression,
+                    .expr_str = v.as<std::string>()};
+        }
+
+        // { type: ..., [value/gradient/expr]: ... }  — verbose map
         if (n["type"]) {
             const auto t = n["type"].as<std::string>();
-            if (t == "neumann") return {.type = FieldCondType::Neumann};
-            if (t == "wall_tangent") return {.type = FieldCondType::WallTangent};
-            if (t == "axis_lf") return {.type = FieldCondType::AxisLF};
-            if (t == "hphi_r0_over_r") return {.type = FieldCondType::HPhi_r0_over_r};
-            if (t == "dirichlet") {
-                if (!n["value"]) {
-                    throw std::runtime_error(
-                        "config: dirichlet condition requires a 'value' key");
-                }
-                return {.type = FieldCondType::Dirichlet,
-                        .value = n["value"].as<double>()};
+
+            if (t == "neumann") {
+                double offset = 0.0;
+                if (n["gradient"]) offset = n["gradient"].as<double>();
+                else if (n["value"]) offset = n["value"].as<double>();
+                return {.type = FieldCondType::Neumann, .value = offset};
             }
-            throw std::runtime_error("config: unknown field condition type '" + t + "'");
+
+            if (t == "dirichlet") {
+                double val = 0.0;
+                if (n["value"]) val = n["value"].as<double>();
+                return {.type = FieldCondType::Dirichlet, .value = val};
+            }
+
+            if (t == "axis_lf") {
+                return {.type = FieldCondType::AxisLF};
+            }
+
+            if (t == "expression" || t == "expr") {
+                if (!n["expr"]) {
+                    throw std::runtime_error(
+                        "config: { type: expression } requires an 'expr' key "
+                        "containing the formula string\n"
+                        "  Example: { type: expression, expr: \"v_z * r_z\" }");
+                }
+                return {.type     = FieldCondType::Expression,
+                        .expr_str = n["expr"].as<std::string>()};
+            }
+
+            // ---- Removed preset names in verbose form ----
+            if (t == "wall_tangent") {
+                throw std::runtime_error(
+                    "config: { type: wall_tangent } is no longer supported.\n"
+                    "  See the 'wall_tangent' migration note above.");
+            }
+            if (t == "hphi_r0_over_r") {
+                throw std::runtime_error(
+                    "config: { type: hphi_r0_over_r } is no longer supported.\n"
+                    "  Use: H_phi: \"r_0 / r\"");
+            }
+
+            throw std::runtime_error(
+                "config: unknown field condition type '" + t + "'.\n"
+                "  Valid types: neumann, dirichlet, expression, axis_lf.\n"
+                "  For an expression use a quoted string directly:  v_r: \"v_z * r_z\"");
         }
+
+        throw std::runtime_error(
+            "config: field condition map must contain one of: 'neumann', "
+            "'dirichlet', 'expr', or 'type'");
     }
 
     throw std::runtime_error(
-        "config: field condition must be a scalar type name or a map "
-        "{ dirichlet: <value> } / { type: ..., value: ... }");
+        "config: field condition must be:\n"
+        "  - a keyword scalar:           neumann / dirichlet / axis_lf\n"
+        "  - a quoted expression string: \"v_z * r_z\"\n"
+        "  - a short map:                { dirichlet: 1.0 } / { neumann: 0.5 } / { expr: \"...\" }\n"
+        "  - a verbose map:              { type: dirichlet, value: 1.0 }");
 }
 
 // ---- Face parser ------------------------------------------------------------
@@ -118,7 +237,7 @@ static auto ParseFace(const YAML::Node& node) -> BCFaceConfig {
             seg.global_hi = rng[1].as<int>();
         }
 
-        // Per-field conditions (all optional; absent = Neumann)
+        // Per-field conditions (all optional; absent = Neumann, offset = 0)
         seg.rho   = ParseFieldCond(item["rho"]);
         seg.v_z   = ParseFieldCond(item["v_z"]);
         seg.v_r   = ParseFieldCond(item["v_r"]);
@@ -206,8 +325,6 @@ void SimConfig::Load(const std::string& path) {
     }
 
     // ---- initial conditions ------------------------------------------------
-    // The entire node is serialised and forwarded to ExpressionIC, which
-    // looks up `vars`, `rho`, `v_z`, … at the top level of the node.
     if (auto n = cfg["initial_conditions"]) {
         if (n["type"]) {
             throw std::runtime_error(
@@ -244,6 +361,5 @@ void SimConfig::Load(const std::string& path) {
     }
 
     // ---- derived quantities ------------------------------------------------
-    // Must be recomputed after grid params are loaded.
     Init();
 }
