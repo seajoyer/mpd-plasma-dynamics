@@ -23,10 +23,10 @@ MPIManager::MPIManager(int& argc, char**& argv, const SimConfig& cfg) {
     MPI_Cart_coords(cart_comm, rank, 2, coords);
 
     // ---- L decomposition (dimension 0) --------------------------------------
-    L_per_proc = cfg.L_max_global / dims[0];
+    L_per_proc = cfg.L_max / dims[0];
     l_start = coords[0] * L_per_proc;
     l_end = (coords[0] + 1) * L_per_proc - 1;
-    if (coords[0] == dims[0] - 1) l_end = cfg.L_max_global - 1;
+    if (coords[0] == dims[0] - 1) l_end = cfg.L_max - 1;
     local_L = l_end - l_start + 1;
     local_L_with_ghosts = local_L + 2;
 

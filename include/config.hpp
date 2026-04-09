@@ -42,7 +42,7 @@ struct ICConfig {
 /// sentinel meaning "use the face's natural start/end":
 ///
 ///   global_lo < 0  →  0                        (first cell on the face)
-///   global_hi < 0  →  L_max_global-1 or M_max  (last cell on the face)
+///   global_hi < 0  →  L_max-1 or M_max  (last cell on the face)
 ///
 /// Each physical field has an independent FieldCond.  Unspecified fields
 /// default to Neumann (zero-gradient).
@@ -118,8 +118,8 @@ struct SimConfig {
     double dt_max           = 1.0e-3;
 
     // ---- global grid ----
-    int L_max_global = 800;
-    int M_max        = 400;
+    int L_max = 800;
+    int M_max = 400;
 
     // ---- convergence ----
     double convergence_threshold = 0.0;   ///< 0 → disabled

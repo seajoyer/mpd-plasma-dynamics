@@ -116,7 +116,7 @@ void IOManager::FillRankBlock(Array2D& dst, double rank_id, int gl, int gm, int 
 // ============================================================
 
 void IOManager::GatherGlobal(const Fields& f, const Grid& grid) {
-    const int L_g = cfg_.L_max_global;
+    const int L_g = cfg_.L_max;
     const int M_g = cfg_.M_max + 1;  // global number of m nodes
     const int nfields = 9;           // rho, v_z, v_r, v_phi, e, H_z, H_r, H_phi, r
 
@@ -216,7 +216,7 @@ void IOManager::GatherGlobal(const Fields& f, const Grid& grid) {
 // ============================================================
 
 void IOManager::WriteVtk(const std::string& filepath) const {
-    const int L_g = cfg_.L_max_global;
+    const int L_g = cfg_.L_max;
     const int M_max = cfg_.M_max;
     const int ni = L_g + 1;    // +1: VTK point count in z
     const int nj = M_max + 1;  // +1: VTK point count in r (= M_g nodes)

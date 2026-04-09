@@ -39,7 +39,7 @@ auto main(int argc, char* argv[]) -> int {
 
     if (mpi.rank == 0) {
         std::printf("Config file         : %s\n", config_path);
-        std::printf("Grid                : %d x %d  (L x M)\n", cfg.L_max_global,
+        std::printf("Grid                : %d x %d  (L x M)\n", cfg.L_max,
                     cfg.M_max);
         std::printf("Initial dt / T end  : %.6e / %.4f\n", cfg.dt, cfg.T);
         std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n", mpi.size,

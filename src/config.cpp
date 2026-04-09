@@ -13,7 +13,7 @@
 using std::move;
 
 void SimConfig::Init() {
-    dz = 1.0 / L_max_global;
+    dz = 1.0 / L_max;
     dy = 1.0 / M_max;
 }
 
@@ -171,7 +171,7 @@ void SimConfig::Load(const std::string& path) {
 
     // ---- grid --------------------------------------------------------------
     if (auto n = cfg["grid"]) {
-        if (n["L_max_global"]) L_max_global = n["L_max_global"].as<int>();
+        if (n["L_max"]) L_max = n["L_max"].as<int>();
         if (n["M_max"]) M_max = n["M_max"].as<int>();
     }
 

@@ -29,8 +29,8 @@ parallel:
   mpi_dims_m: 0
 
 grid:
-  L_max_global: 800
-  M_max:        400
+  L_max: 800
+  M_max: 400
 
 # ── Geometry ────────────────────────────────────────────────────────────────
 # `type` must match a name registered in register_all_geometries().

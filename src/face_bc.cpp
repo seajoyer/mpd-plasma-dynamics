@@ -61,7 +61,7 @@ auto FaceBC::FaceGlobalRange(const SimConfig& cfg) const noexcept
             return {0, cfg.M_max};
         case Face::M_LO:
         case Face::M_HI:
-            return {0, cfg.L_max_global - 1};
+            return {0, cfg.L_max - 1};
     }
     return {0, 0};
 }
