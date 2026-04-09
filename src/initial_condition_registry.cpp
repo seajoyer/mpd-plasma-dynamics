@@ -4,6 +4,7 @@
 
 #include <stdexcept>
 
+#include "ics/expression_ic.hpp"
 #include "ics/uniform_mhd.hpp"
 
 // ============================================================
@@ -42,6 +43,9 @@ void RegisterAllInitialConditions() {
 
     reg.Register("uniform_mhd",
                  [](const YAML::Node& p) { return std::make_unique<UniformMhdIC>(p); });
+
+    reg.Register("expression",
+                 [](const YAML::Node& p) { return std::make_unique<ExpressionIC>(p); });
 
     // ----------------------------------------------------------------
     // Add new IC types here by following the pattern above.

@@ -4,12 +4,12 @@ physics:
   H_z0:  0.25
 
 time:
-  T:  4.0
+  T:  0.5
   dt: 0.00001
 
 adaptive_dt:
   enabled:       true
-  cfl_number:    0.65
+  cfl_number:    0.45
   growth_factor: 1.10
   dt_min:        1.0e-9
   dt_max:        5.0e-5
@@ -48,54 +48,67 @@ geometry:
 #
 # Built-in types
 # ──────────────
-#   uniform_mhd   Per-field configurable IC.  All eight primary physical
-#                 variables are specified independently under `params`.
-#                 Omitted fields use the defaults shown below.
+#   uniform_mhd   Preset-based IC with named condition types
+#                 (from_physics, wall_tangent, linear_free_vortex, …).
+#                 Kept for backward compatibility.
 #
-# Per-field specification (all keys under `params` are optional)
-# ──────────────────────────────────────────────────────────────
-#   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
+#   expression    Expression-based IC.  Each field is a free math expression
+#                 evaluated cell-by-cell.  See below for full documentation.
 #
-#   Each field accepts one of:
+# ── Expression IC ────────────────────────────────────────────────────────────
 #
-#     from_physics          Derive from physics params in config:
-#                             H_z  →  H_z0
-#                             e    →  beta / (2·(gamma − 1))
+# Available symbols in every expression
+# ──────────────────────────────────────
+#   Physics constants (set from the [physics] block above)
+#     gamma      adiabatic index
+#     beta       plasma beta
+#     H_z0       reference axial magnetic field
+#     r_0        mid-channel radius at z=0: (r_inner(0) + r_outer(0)) / 2
 #
-#     wall_tangent          H_r = H_z · r_z   (H_r only)
+#   Spatial variables (cell-local)
+#     z          axial coordinate   [= l_global * dz]
+#     r          radial coordinate  [= grid.r[l][m]]
+#     r_z        dr/dz skew metric  [= grid.r_z[l][m]]
 #
-#     linear_free_vortex    H_phi = (1 − 0.9·z) · r_0/r   (H_phi only)
-#                           Uses default amplitude = 1.0, factor = 0.9.
+#   Mathematical constant
+#     pi         3.14159…
 #
-#     { uniform: <v> }      Constant value v everywhere.
+#   Standard functions
+#     sin, cos, tan, asin, acos, atan, atan2
+#     exp, log, log2, log10, sqrt, pow, abs, sign, min, max, clamp
+#     (Use exp(1) for Euler's number; 'e' is reserved for specific energy.)
 #
-#     { free_vortex: <a> }  H_phi = a · r_0/r   (H_phi only)
+#   Previously-assigned field values (see evaluation order below)
+#     rho, v_z, v_r, v_phi, H_z, H_r, H_phi, e
 #
-#     { linear_free_vortex: { amplitude: <a>, factor: <f> } }
-#                           H_phi = a · (1 − f·z) · r_0/r
+# Evaluation order: rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
+#   Each expression may reference fields earlier in this sequence.
 #
-# Defaults when `params` key is absent for a field
-# ─────────────────────────────────────────────────
-#   rho   → uniform 1.0
-#   v_z   → uniform 0.0
-#   v_r   → uniform 0.0
-#   v_phi → uniform 0.0
-#   e     → from_physics   [beta / (2·(gamma−1))]
-#   H_z   → from_physics   [H_z0]
-#   H_r   → wall_tangent   [H_z · r_z]
-#   H_phi → linear_free_vortex  [amplitude=1, factor=0.9]
+# YAML quoting
+#   Quote any expression that contains YAML-special characters: * { } : [ ]
+#   Plain numbers (1.0, 0.25) and bare identifiers (H_z0) need no quotes.
+#
+# Defaults when a field key is absent
+#   rho:   1.0
+#   v_z:   0.0
+#   v_r:   0.0
+#   v_phi: 0.0
+#   H_z:   H_z0
+#   H_r:   "H_z * r_z"
+#   H_phi: "(1 - 0.9 * z) * r_0 / r"
+#   e:     "beta / (2 * (gamma - 1))"
 #
 initial_conditions:
-  type: uniform_mhd
+  type: expression
   params:
-    rho:   { uniform: 1.0 }
-    v_z:   { uniform: 0.1 }
-    v_r:   { uniform: 0.1 }
-    v_phi: { uniform: 0.0 }
-    e:     from_physics                    # beta / (2·(gamma−1))
-    H_z:   from_physics                    # H_z0
-    H_r:   wall_tangent                    # H_z · r_z
-    H_phi: linear_free_vortex              # (1 − 0.9·z) · r_0/r
+    rho:   1.0
+    v_z:   0.1
+    v_r:   0.1
+    v_phi: 0.0
+    H_z:   H_z0
+    H_r:   "H_z * r_z"
+    H_phi: "(1 - 0.9 * z) * r_0 / r"
+    e:     "beta / (2 * (gamma - 1))"
 
 # ── Boundary conditions ─────────────────────────────────────────────────────
 #

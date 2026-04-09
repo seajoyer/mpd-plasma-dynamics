@@ -38,9 +38,14 @@ add_executable(${PROJECT_NAME}
     # IC framework + built-in implementations
     src/initial_condition_registry.cpp
     src/ics/uniform_mhd.cpp
+    src/ics/expression_ic.cpp
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE src include)
+target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        src
+        include
+)
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
@@ -48,6 +53,11 @@ target_link_libraries(${PROJECT_NAME}
         OpenMP::OpenMP_CXX
         yaml-cpp::yaml-cpp
         VTK::IOLegacy
+        exprtk::exprtk
+)
+
+set_source_files_properties(src/ics/expression_ic.cpp
+    PROPERTIES COMPILE_FLAGS "-O1"
 )
 
 message(STATUS "Build type          : ${CMAKE_BUILD_TYPE}")
@@ -60,3 +70,4 @@ message(STATUS "MPI link flags      : ${MPI_CXX_LINK_FLAGS}")
 message(STATUS "MPI libraries       : ${MPI_CXX_LIBRARIES}")
 message(STATUS "VTK version         : ${VTK_VERSION}")
 message(STATUS "yaml-cpp version    : ${yaml-cpp_VERSION}")
+message(STATUS "exprtk source dir   : ${exprtk_SOURCE_DIR}")

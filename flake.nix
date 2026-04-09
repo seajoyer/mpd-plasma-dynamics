@@ -33,6 +33,7 @@
             vtk
             clang-tools
             yaml-cpp
+            exprtk
             gdb
           ];
 
