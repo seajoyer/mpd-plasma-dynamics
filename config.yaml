@@ -1,7 +1,7 @@
 physics:
   gamma: 1.67
   beta:  0.05
-  H_z0:  0.25
+  H_z_0:  0.25
 
 time:
   T:  0.5
@@ -36,12 +36,42 @@ grid:
 #
 # type must match a name registered in register_all_geometries().
 #
-# Built-in types:
-#   short_cathode_cosine     C¹ cosine-smoothed throat transition (recommended)
-#   short_cathode_parabolic  Piecewise-parabolic throat (legacy)
+# Built-in types and their configurable params
+# ─────────────────────────────────────────────
+#
+#   short_cathode_cosine
+#     C¹ cosine-smoothed throat transition (recommended).
+#     params:
+#       z_center:               0.31    # axial centre of the cosine transition
+#       transition_half_width:  0.015   # half-width of the transition band
+#       r_inner_before:         0.200   # cathode-face inner radius
+#       r_inner_after:          0.005   # thin-electrode inner radius
+#       r_outer:                0.800   # anode (outer wall) radius
+#
+#   short_cathode_parabolic
+#     Piecewise-parabolic throat profile (legacy).
+#     The parabola coefficient A and arc centre are derived automatically
+#     from the four free positional params so that r and dr/dz are
+#     C⁰-continuous everywhere (C¹ at the throat by symmetry).
+#     params:
+#       z_flat_end:    0.300   # end of the flat cathode section
+#       z_throat:      0.400   # axial position of the inner-wall throat
+#       z_thin_start:  0.478   # start of the thin inner-electrode section
+#       r_flat:        0.200   # cathode-face inner radius (flat section)
+#       r_thin:        0.005   # thin-electrode inner radius
+#       r_outer:       0.800   # anode (outer wall) radius
+#
+# Omitting the params block (or any individual key) uses the default values
+# shown above — the simulation is unchanged from the previous hard-coded behaviour.
 #
 geometry:
   type: short_cathode_cosine
+  params:
+    z_center:               0.31
+    transition_half_width:  0.015
+    r_inner_before:         0.200
+    r_inner_after:          0.005
+    r_outer:                0.800
 
 # ── Initial conditions ────────────────────────────────────────────────────────
 #
