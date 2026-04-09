@@ -9,17 +9,19 @@
 #include "fields.hpp"
 #include "geometry_registry.hpp"
 #include "grid.hpp"
+#include "initial_condition_registry.hpp"
 #include "io_manager.hpp"
 #include "mpi_manager.hpp"
 #include "solver.hpp"
 
 auto main(int argc, char* argv[]) -> int {
     // ----------------------------------------------------------------
-    // 1. Register all built-in geometry types.
+    // 1. Register all built-in geometry and IC types.
     //    Must happen before SimConfig::load() tries to validate names
-    //    or Grid is constructed.
+    //    or Grid / Fields are constructed.
     // ----------------------------------------------------------------
     register_all_geometries();
+    RegisterAllInitialConditions();
 
     // ----------------------------------------------------------------
     // 2. Configuration
@@ -43,6 +45,7 @@ auto main(int argc, char* argv[]) -> int {
         std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n", mpi.size,
                     mpi.dims[0], mpi.dims[1]);
         std::printf("Geometry            : %s\n", cfg.geometry.type.c_str());
+        std::printf("Initial conditions  : %s\n", cfg.initial_conditions.type.c_str());
 
         if (cfg.adaptive_dt) {
             std::printf(
@@ -78,7 +81,18 @@ auto main(int argc, char* argv[]) -> int {
     auto geometry = GeometryRegistry::Instance().create(cfg.geometry.type, geom_params);
 
     // ----------------------------------------------------------------
-    // 4. Build grid and initialise fields
+    // 4. Build initial condition
+    // ----------------------------------------------------------------
+    YAML::Node ic_params;
+    if (!cfg.initial_conditions.params_yaml.empty()) {
+        ic_params = YAML::Load(cfg.initial_conditions.params_yaml);
+    }
+
+    auto ic = InitialConditionRegistry::Instance().Create(
+        cfg.initial_conditions.type, ic_params);
+
+    // ----------------------------------------------------------------
+    // 5. Build grid and initialise fields
     // ----------------------------------------------------------------
     Grid grid(cfg, mpi.local_L_with_ghosts, mpi.l_start, mpi.local_M_with_ghosts,
               mpi.m_start, *geometry);
@@ -86,7 +100,7 @@ auto main(int argc, char* argv[]) -> int {
     Fields fields(mpi.local_L_with_ghosts, mpi.local_M_with_ghosts,
                   cfg.convergence_threshold > 0.0);
 
-    fields.InitPhysical(cfg, grid, mpi.l_start);
+    fields.InitPhysical(*ic, cfg, grid, mpi.l_start);
     fields.InitConservative(grid);
 
     if (cfg.convergence_threshold > 0.0) {
@@ -94,7 +108,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // ----------------------------------------------------------------
-    // 5. Construct solver and I/O manager
+    // 6. Construct solver and I/O manager
     //    Solver::Solver() calls FaceBC::from_config() which creates
     //    PerFieldBC objects directly from BCSegmentConfig — no external
     //    BC registry is needed.
@@ -103,7 +117,7 @@ auto main(int argc, char* argv[]) -> int {
     IOManager io(cfg, mpi);
 
     // ----------------------------------------------------------------
-    // 6. Time loop
+    // 7. Time loop
     // ----------------------------------------------------------------
     double t = 0.0;
     int step_count = 0;

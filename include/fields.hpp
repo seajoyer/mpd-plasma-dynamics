@@ -4,6 +4,8 @@
 #include "config.hpp"
 #include "grid.hpp"
 
+class IInitialCondition;
+
 /// Owns every 2-D field array needed by the simulation.
 ///
 /// With 2-D MPI decomposition the array dimensions are:
@@ -45,10 +47,20 @@ public:
 
     // ---- initialisation ----
 
-    /// Set initial conditions on physical arrays for interior cells
-    /// [1..local_L][1..local_M].  Ghost cells are left uninitialised; they
-    /// will be filled by the first ghost exchange in Solver::advance().
-    void InitPhysical(const SimConfig& cfg, const Grid& grid, int l_start);
+    /// Apply the initial condition to all interior cells [1..local_L][1..local_M]
+    /// by delegating to ic.Apply().  Ghost cells are left at zero; they are
+    /// filled by the first ghost exchange inside Solver::advance().
+    ///
+    /// The IC sets all physical fields (rho, v_*, H_*, e) and the derived
+    /// scalars (p, P) so the solver has a fully consistent state before the
+    /// first time step.
+    ///
+    /// @param ic       IC implementation chosen via InitialConditionRegistry.
+    /// @param cfg      Global simulation parameters forwarded to the IC.
+    /// @param grid     Local mesh forwarded to the IC.
+    /// @param l_start  Global l-index of the first owned interior cell.
+    void InitPhysical(const IInitialCondition& ic, const SimConfig& cfg,
+                      const Grid& grid, int l_start);
 
     /// Compute conservative arrays u0_* from the already-set physical arrays.
     void InitConservative(const Grid& grid);

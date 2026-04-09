@@ -205,6 +205,16 @@ void SimConfig::Load(const std::string& path) {
         }
     }
 
+    // ---- initial conditions ------------------------------------------------
+    if (auto n = cfg["initial_conditions"]) {
+        if (n["type"]) initial_conditions.type = n["type"].as<std::string>();
+        if (n["params"]) {
+            std::ostringstream oss;
+            oss << n["params"];
+            initial_conditions.params_yaml = oss.str();
+        }
+    }
+
     // ---- boundary conditions -----------------------------------------------
     if (auto n = cfg["boundary_conditions"]) {
         if (n["l_lo"]) bc_l_lo = ParseFace(n["l_lo"]);

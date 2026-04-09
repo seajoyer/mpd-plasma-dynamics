@@ -34,6 +34,10 @@ add_executable(${PROJECT_NAME}
     # Built-in geometry implementations
     src/geometries/short_cathode_parabolic.cpp
     src/geometries/short_cathode_cosine.cpp
+
+    # IC framework + built-in implementations
+    src/initial_condition_registry.cpp
+    src/ics/uniform_mhd.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE src include)

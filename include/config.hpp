@@ -19,6 +19,19 @@ struct GeometryConfig {
 };
 
 // ============================================================
+// Initial-condition configuration
+// ============================================================
+
+/// Runtime configuration for the initial condition.
+/// `type`        maps to a name registered in InitialConditionRegistry.
+/// `params_yaml` holds the raw YAML text of the optional `params` sub-node,
+///               which is parsed and forwarded to the IC factory.
+struct ICConfig {
+    std::string type        = "uniform_mhd";
+    std::string params_yaml;   ///< empty → no params; factory receives a null node
+};
+
+// ============================================================
 // Boundary-condition configuration
 // ============================================================
 
@@ -124,6 +137,9 @@ struct SimConfig {
 
     // ---- geometry ----
     GeometryConfig geometry;
+
+    // ---- initial conditions ----
+    ICConfig initial_conditions;
 
     // ---- boundary conditions (one BCFaceConfig per Cartesian face) ----
     BCFaceConfig bc_l_lo;   ///< z = 0  face (inflow by default)
