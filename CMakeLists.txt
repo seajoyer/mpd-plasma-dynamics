@@ -23,6 +23,7 @@ add_executable(${PROJECT_NAME}
     src/diagnostics.cpp
     src/io_manager.cpp
     src/solver.cpp
+    src/verification.cpp
 
     # BC + geometry framework
     src/face_bc.cpp

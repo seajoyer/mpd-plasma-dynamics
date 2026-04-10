@@ -13,6 +13,7 @@
 #include "io_manager.hpp"
 #include "mpi_manager.hpp"
 #include "solver.hpp"
+#include "verification.hpp"
 
 auto main(int argc, char* argv[]) -> int {
     // ----------------------------------------------------------------
@@ -68,6 +69,21 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // ----------------------------------------------------------------
+    // Verification check 1: ghost exchange round-trip.
+    //
+    // Run immediately after MPI initialisation — before any field
+    // allocation — so that an MPI packing or neighbour bug is caught
+    // before it silently corrupts physics results.  A FAIL here must
+    // be resolved before proceeding.
+    // ----------------------------------------------------------------
+    if (mpi.rank == 0) { std::printf("\n--- Layer-1 verification ---\n"); }
+    const bool ghost_ok = Verification::CheckGhostExchange(mpi, cfg);
+    if (!ghost_ok) {
+        // Ghost exchange errors make all subsequent results meaningless.
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    // ----------------------------------------------------------------
     // 3. Build geometry (owned in main; outlives Grid)
     // ----------------------------------------------------------------
     YAML::Node geom_params;
@@ -108,6 +124,30 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     // ----------------------------------------------------------------
+    // Verification check 2: radial symmetry at t = 0.
+    //
+    // Reports the maximum normalised radial density gradient across all
+    // interior cells.  For the default thruster IC the value will be
+    // non-zero (radial variation is physical); record this as a baseline
+    // to compare against if unexpected symmetry-breaking is suspected.
+    // For a 1-D test case (radially-uniform IC) the value should be ~0.
+    // ----------------------------------------------------------------
+    Verification::CheckRadialSymmetry(fields, mpi);
+
+    // ----------------------------------------------------------------
+    // Verification check 3: conserved-integral tracking.
+    //
+    // Capture the reference integrals at step 0 so that every subsequent
+    // snapshot can report the cumulative drift.  For open BCs a steady
+    // monotonic drift is expected; a sudden large jump flags a bug.
+    // ----------------------------------------------------------------
+    const auto integrals_ref = Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+    Verification::PrintIntegralsHeader(mpi.rank);
+    Verification::PrintIntegrals(integrals_ref, 0, 0.0, mpi.rank);
+
+    if (mpi.rank == 0) { std::printf("----------------------------\n\n"); }
+
+    // ----------------------------------------------------------------
     // 6. Construct solver and I/O manager
     //    Solver::Solver() calls FaceBC::FromConfig() which creates
     //    PerFieldBC objects directly from BCSegmentConfig.
@@ -134,7 +174,7 @@ auto main(int argc, char* argv[]) -> int {
     const int check_m_local = owns_checkpoint ? (check_m_global - mpi.m_start + 1) : -1;
 
     if (mpi.rank == 0) {
-        std::printf("\n%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
+        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
                     "t", "dt", "rho", "v_z", "v_phi", "e", "H_phi");
         std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
                     "--------------", "--------------", "--------------",
@@ -187,6 +227,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (step_count % 1000 == 0) {
+            // ---- Physics checkpoint (existing) ----
             double local_vals[5] = {0, 0, 0, 0, 0};
             if (owns_checkpoint) {
                 local_vals[0] = fields.rho  [check_l_local][check_m_local];
@@ -205,6 +246,11 @@ auto main(int argc, char* argv[]) -> int {
                     global_vals[0], global_vals[1], global_vals[2],
                     global_vals[3], global_vals[4]);
             }
+
+            // ---- Verification: append a row to the integral table ----
+            const auto integrals_now =
+                Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+            Verification::PrintIntegrals(integrals_now, step_count, t, mpi.rank);
         }
     }
 
@@ -219,6 +265,17 @@ auto main(int argc, char* argv[]) -> int {
         std::printf("Final VTK written : %s/step_%04d.vtk\n",
                     io.RunDir().c_str(), step_count);
     }
+
+    // ----------------------------------------------------------------
+    // Final verification: report total integral drift from step 0.
+    //
+    // For open BCs a non-zero drift is expected; look for consistency
+    // (smooth monotonic drift) rather than conservation.  A sudden
+    // spike compared to the per-step table rows above flags a bug.
+    // ----------------------------------------------------------------
+    const auto integrals_final =
+        Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+    Verification::ReportDrift(integrals_ref, integrals_final, step_count, t, mpi.rank);
 
     return 0;
 }
