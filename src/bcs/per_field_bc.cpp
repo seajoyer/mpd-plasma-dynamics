@@ -218,7 +218,7 @@ PerFieldBC::PerFieldBC(enum FaceBC::Face face, const BCSegmentConfig& seg)
     // ---- Validate AxisLF field selection ----
     // AxisLF is only defined for rho, v_z, e, H_z (mapped to u_1, u_2, u_5, u_7).
     // The remaining four fields have no half-stencil LF formula.
-    const auto require_no_axis_lf = [](const FieldCond& fc, const char* name) {
+    const auto require_no_axis_lf = [](const FieldCond& fc, const char* name) -> void {
         if (fc.type == FieldCondType::AxisLF) {
             throw std::runtime_error(
                 std::string("PerFieldBC: AxisLF is only valid for rho, v_z, e, and H_z "

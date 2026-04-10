@@ -20,7 +20,7 @@ auto main(int argc, char* argv[]) -> int {
     //    Must happen before SimConfig::Load() tries to validate names
     //    or Grid is constructed.
     // ----------------------------------------------------------------
-    register_all_geometries();
+    RegisterAllGeometries();
 
     // ----------------------------------------------------------------
     // 2. Configuration
@@ -75,7 +75,7 @@ auto main(int argc, char* argv[]) -> int {
         geom_params = YAML::Load(cfg.geometry.params_yaml);
     }
 
-    auto geometry = GeometryRegistry::Instance().create(cfg.geometry.type, geom_params);
+    auto geometry = GeometryRegistry::Instance().Create(cfg.geometry.type, geom_params);
 
     // ----------------------------------------------------------------
     // 4. Build initial condition

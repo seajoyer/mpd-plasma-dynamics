@@ -76,7 +76,7 @@ auto SolutionChange(const Fields& f, int local_L, int local_M) -> double {
     #pragma omp parallel for collapse(2) reduction(+ : sum_diff, sum_curr)
     for (int l = 1; l <= local_L; ++l) {
         for (int m = 1; m <= local_M; ++m) {
-            auto sq = [](double x) { return x * x; };
+            auto sq = [](double x) -> double { return x * x; };
 
             const double d_rho  = f.rho  [l][m] - f.rho_prev  [l][m];
             const double d_vz   = f.v_z  [l][m] - f.v_z_prev  [l][m];

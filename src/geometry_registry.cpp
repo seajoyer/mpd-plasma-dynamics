@@ -20,7 +20,7 @@ void GeometryRegistry::RegisterGeometry(std::string name, Factory factory) {
     factories_.emplace(std::move(name), std::move(factory));
 }
 
-auto GeometryRegistry::create(const std::string& type, const YAML::Node& params) const
+auto GeometryRegistry::Create(const std::string& type, const YAML::Node& params) const
     -> std::unique_ptr<IGeometry> {
     auto it = factories_.find(type);
     if (it == factories_.end()) {
@@ -36,7 +36,7 @@ auto GeometryRegistry::create(const std::string& type, const YAML::Node& params)
 // Built-in geometry registrations
 // ============================================================
 
-void register_all_geometries() {
+void RegisterAllGeometries() {
     GeometryRegistry& reg = GeometryRegistry::Instance();
 
     reg.RegisterGeometry("short_cathode_parabolic", [](const YAML::Node& p) {

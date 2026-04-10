@@ -18,10 +18,10 @@ public:
     virtual ~IGeometry() = default;
 
     /// Inner-wall radius at axial position z.
-    [[nodiscard]] virtual auto RInner    (double z) const -> double = 0;
+    [[nodiscard]] virtual auto RInner   (double z) const -> double = 0;
 
     /// Outer-wall radius at axial position z.
-    [[nodiscard]] virtual auto ROuter    (double z) const -> double = 0;
+    [[nodiscard]] virtual auto ROuter   (double z) const -> double = 0;
 
     /// d(r_inner)/dz — used for the mesh-skew metric.
     [[nodiscard]] virtual auto DrInnerDz(double z) const -> double = 0;

@@ -25,7 +25,7 @@
 
 namespace {
 
-const std::vector<std::string>& ReservedSymbols() {
+auto ReservedSymbols() -> const std::vector<std::string>& {
     static const std::vector<std::string> names = {
         // physics constants
         "gamma", "beta", "H_z0", "r_0",
@@ -232,7 +232,7 @@ auto ReadUserVars(const YAML::Node& params)
     }
 
     for (const auto& item : n) {
-        const std::string name = item.first.as<std::string>();
+        const auto name = item.first.as<std::string>();
 
         if (!item.second.IsScalar()) {
             throw std::runtime_error(

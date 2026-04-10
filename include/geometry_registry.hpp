@@ -22,8 +22,8 @@ public:
     void RegisterGeometry(std::string name, Factory factory);
 
     /// Throws std::runtime_error if `type` is unknown.
-    std::unique_ptr<IGeometry> create(const std::string& type,
-                                       const YAML::Node& params) const;
+    auto Create(const std::string& type,
+                                       const YAML::Node& params) const -> std::unique_ptr<IGeometry>;
 
 private:
     GeometryRegistry() = default;
@@ -31,4 +31,4 @@ private:
 };
 
 /// Register every built-in geometry type.  Call once before constructing any Grid.
-void register_all_geometries();
+void RegisterAllGeometries();

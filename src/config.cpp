@@ -143,8 +143,9 @@ static auto ParseFieldCond(const YAML::Node& n) -> FieldCond {
 
             if (t == "neumann") {
                 double offset = 0.0;
-                if (n["gradient"]) offset = n["gradient"].as<double>();
-                else if (n["value"]) offset = n["value"].as<double>();
+                if (n["gradient"]) { offset = n["gradient"].as<double>();
+                } else if (n["value"]) { offset = n["value"].as<double>();
+}
                 return {.type = FieldCondType::Neumann, .value = offset};
             }
 
