@@ -35,6 +35,7 @@ add_executable(${PROJECT_NAME}
     # Built-in geometry implementations
     src/geometries/short_cathode_parabolic.cpp
     src/geometries/short_cathode_cosine.cpp
+    src/geometries/villani_mpdt.cpp
 
     # IC implementation
     src/ics/expression_ic.cpp

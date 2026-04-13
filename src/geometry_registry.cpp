@@ -6,6 +6,7 @@
 
 #include "geometries/short_cathode_cosine.hpp"
 #include "geometries/short_cathode_parabolic.hpp"
+#include "geometries/villani_mpdt.hpp"
 
 // ============================================================
 // GeometryRegistry singleton
@@ -45,6 +46,10 @@ void RegisterAllGeometries() {
 
     reg.RegisterGeometry("short_cathode_cosine", [](const YAML::Node& p) {
         return std::make_unique<ShortCathodeCosineGeometry>(p);
+    });
+
+    reg.RegisterGeometry("villani_mpdt", [](const YAML::Node& p) {
+        return std::make_unique<VillaniMPDTGeometry>(p);
     });
 
     // ----------------------------------------------------------------
