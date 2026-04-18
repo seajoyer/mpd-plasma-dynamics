@@ -21,6 +21,7 @@ add_executable(${PROJECT_NAME}
     src/grid.cpp
     src/fields.cpp
     src/diagnostics.cpp
+    src/integrals.cpp
     src/io_manager.cpp
     src/solver.cpp
     src/verification.cpp

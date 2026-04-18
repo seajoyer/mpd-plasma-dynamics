@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=mpd-plasma-hybrid
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=24
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=23
 #SBATCH --cpus-per-task=2
-#SBATCH --time=04:30:00
+#SBATCH --time=06:00:00
 #SBATCH --mem=16G
 #SBATCH --output=output/log/mpd-plasma-%j.out
 #SBATCH --error=output/log/mpd-plasma-%j.err

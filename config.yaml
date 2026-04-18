@@ -1,17 +1,17 @@
 physics:
   gamma: 1.67
-  beta:  0.05
-  H_z_0: 0.25
+  beta:  0.01
+  H_z0:  0.25
 
 time:
-  T:  0.5
-  dt: 0.000010
+  T:  6
+  dt: 1.0e-7
 
 adaptive_dt:
   enabled:       true
-  cfl_number:    0.45
+  cfl_number:    0.5
   growth_factor: 1.10
-  dt_min:        1.0e-9
+  dt_min:        1.0e-10
   dt_max:        5.0e-5
 
 convergence:
@@ -20,7 +20,7 @@ convergence:
 
 output:
   directory: output
-  run_name:  villani
+  run_name:  run
   vtk_step:  5000
 
 parallel:
@@ -29,85 +29,140 @@ parallel:
   mpi_dims_m: 0
 
 grid:
-  L_max: 800   # 800 cells in z  →  dz = 1/800
-  M_max: 400   # 400 cells in r
+  L_max: 800
+  M_max: 400
 
-# ── Geometry: Villani (1982) MPDT benchmark ───────────────────────────────────
+# ── Geometry ─────────────────────────────────────────────────────────────────
 #
-# Two coaxial cylindrical electrodes of different lengths:
+#   short_cathode_cosine
+#     C¹ cosine-smoothed throat transition (recommended).
+#     params:
+#       z_center:               0.31    # axial centre of the cosine transition
+#       transition_half_width:  0.015   # half-width of the transition band
+#       r_inner_before:         0.200   # cathode-face inner radius
+#       r_inner_after:          0.005   # thin-electrode inner radius
+#       r_outer:                0.800   # anode (outer wall) radius
 #
-#   Cathode (inner):  r_c = 0.95 cm,  l_c = 26.4 cm
-#   Anode   (outer):  r_a = 5.10 cm,  l_a = 20.0 cm
-#   Simulation box:   r_domain = 10.2 cm,  z_max = 51.0 cm
-#
-# All lengths are in the same "simulation unit" where z is normalised to [0,1]
-# (z = 1 corresponds to the far end of the domain, z_max = 51 cm here).
-# Radial values share the same unit, so multiply by z_max = 51 cm to recover cm:
-#
-#   r_cathode     = 0.0186 × 51 cm ≈ 0.95 cm   ✓
-#   r_anode       = 0.100  × 51 cm ≈ 5.10 cm   ✓
-#   r_outer_domain= 0.200  × 51 cm ≈ 10.2 cm   ✓
-#   z_cathode     = 0.518  × 51 cm ≈ 26.4 cm   ✓
-#   z_anode       = 0.392  × 51 cm ≈ 20.0 cm   ✓
-#
-# The cosine half-widths control the smoothing at each electrode tip.
-# Setting them to 0 gives a sharp step (C⁰); the default 0.015 gives a
-# C¹ transition spanning ≈ 1.5 cm (0.030 × 51 cm) centred on the tip.
+# Omitting the params block (or any individual key) uses the default values
+# shown above — the simulation is unchanged from the previous hard-coded behaviour.
 #
 geometry:
-  type: villani_mpdt
+  type: short_cathode_cosine
   params:
-    # ── Cathode (inner electrode) ──────────────────────────────────────────
-    r_cathode:              0.0186   # cathode radius  (≈ 0.95 cm at 51 cm domain)
-    z_cathode:              0.518    # cathode tip z-position  [fraction of domain, 0–1]
-    r_inner_after:          0.0002   # inner radius beyond the cathode tip (near-axis)
-    cathode_tip_half_width: 0.015    # cosine blend half-width  (0 = sharp step)
+    z_center:               0.31
+    transition_half_width:  0.02
+    r_inner_before:         0.200
+    r_inner_after:          0.005
+    r_outer:                0.800
 
-    # ── Anode (outer electrode) ────────────────────────────────────────────
-    r_anode:                0.100    # anode radius   (≈ 5.10 cm)
-    z_anode:                0.392    # anode tip z-position  [fraction of domain, 0–1]
-    r_outer_domain:         0.200    # outer domain radius beyond the anode (≈ 10.2 cm)
-    anode_tip_half_width:   0.015    # cosine blend half-width  (0 = sharp step)
+  # params:
+  #   z_center:               0.31
+  #   transition_half_width:  0.02
+  #   r_inner_before:         0.086
+  #   r_inner_after:          0.002
+  #   r_outer:                0.350
 
 # ── Initial conditions ────────────────────────────────────────────────────────
+#
+# Fields are specified as mathematical expressions evaluated cell-by-cell.
+# Derived fields (p, P) are computed automatically from the primaries.
+#
+# ── Available symbols ─────────────────────────────────────────────────────────
+#
+#   Physics constants  (from the [physics] block)
+#     gamma   beta   H_z0   r_0
+#
+#   Spatial variables  (cell-local, read-only)
+#     z       axial coordinate  [l_global × dz]
+#     r       radial coordinate [grid.r[l][m]]
+#     r_z     dr/dz skew metric [grid.r_z[l][m]]
+#
+#   Math constant
+#     pi
+#
+#   Standard functions
+#     sin  cos  tan  asin  acos  atan  atan2
+#     exp  log  log2 log10 sqrt  pow   abs   sign
+#     min  max  clamp
+#     (Use exp(1) for Euler's number — 'e' is reserved for specific energy.)
+#
+# ── Evaluation order ─────────────────────────────────────────────────────────
+#
+#   rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
+#   Each expression may reference fields earlier in this sequence.
+#
 initial_conditions:
-  rho:   1.0
+  rho:   0.1
   v_z:   0.1
-  v_r:   0.0
+  v_r:   0.1
   v_phi: 0.0
   H_z:   H_z0
   H_r:   "H_z * r_z"
-  H_phi: "r_0 / r"
+  H_phi: "(1 - 0.9 * z) * r_0 / r"
   e:     "beta / (2 * (gamma - 1))"
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
 #
-# For the Villani MPDT the M_LO face spans three regions along z:
+# Each face (l_lo, l_hi, m_lo, m_hi) is a sequence of segments.
+# Segments are applied in order; together they should cover the full face.
 #
-#   [0, z_anode)      Cathode wall where it faces the anode (solid wall).
-#   [z_anode, z_cathode)  Cathode wall beyond the anode tip (open on outer side).
-#   [z_cathode, end)  Axis of symmetry (no cathode wall, r → 0).
+# Segment fields
+# ──────────────
+#   range       (optional)  [global_lo, global_hi] along the free axis.
+#                           Negative value = sentinel for face start/end.
+#                           Omit entirely  = full face (same as [-1, -1]).
 #
-# The global l-index boundaries correspond to (with L_max = 800):
-#   z_anode   = 0.392 × 800 ≈ l = 314
-#   z_cathode = 0.518 × 800 ≈ l = 415
+#   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
+#               (all optional, default = neumann)
 #
-# Adjust range values if L_max or z_anode / z_cathode change.
+# Condition syntax
+# ────────────────
+#   neumann              Zero-gradient: f_bc = f_interior  (offset = 0)
+#   { neumann: G }       Constant-offset: f_bc = f_interior + G
+#
+#   dirichlet            Fix to 0
+#   { dirichlet: V }     Fix to the constant value V
+#
+#   "expression"         Evaluate a formula at each boundary cell.
+#   { expr: "..." }      All physics constants, grid quantities,
+#                        neighbour values, and previously-evaluated
+#                        boundary values are available as symbols.
+#                        See FieldCondType::Expression documentation
+#                        for the complete symbol table.
+#
+#   axis_lf              One-sided Lax–Friedrichs update for the axis of
+#                        symmetry.  Valid only for rho / v_z / e / H_z
+#                        on the M_LO face.
+#
+# Expression symbol quick-reference
+# ──────────────────────────────────
+#   Physics:   gamma  beta  H_z0  r_0  dz  dr
+#   Boundary cell:  r  r_z  z
+#   Neighbour cell: r_nb  r_z_nb
+#   Neighbour fields: rho_nb  v_z_nb  v_r_nb  v_phi_nb  e_nb
+#                     H_z_nb  H_r_nb  H_phi_nb
+#   Boundary values (evaluation order, cross-field references):
+#                     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
+#
+# Free-axis convention
+# ─────────────────────
+#   l_lo / l_hi faces  →  free axis is m  (range = global m indices)
+#   m_lo / m_hi faces  →  free axis is l  (range = global l indices)
 #
 boundary_conditions:
 
-  # ── Inlet (z = 0, between cathode and anode) ─────────────────────────────
+  # ── Inlet (z = 0) ────────────────────────────────────────────────────────
   l_lo:
     - rho:   neumann
       v_z:   { dirichlet: 0.0 }
       v_r:   neumann
       v_phi: neumann
       e:     neumann
-      H_z:   { dirichlet: 0.25 }
+      H_z:   "H_z0"
       H_r:   { dirichlet: 0.0 }
       H_phi: "r_0 / r"
 
-  # ── Outlet (z = z_max, free outflow) ─────────────────────────────────────
+  # ── Outlet (z = L) ───────────────────────────────────────────────────────
   l_hi:
     - rho:   neumann
       v_z:   neumann
@@ -118,13 +173,9 @@ boundary_conditions:
       H_r:   neumann
       H_phi: neumann
 
-  # ── Outer boundary ────────────────────────────────────────────────────────
-  #
-  # [0, 314]   Anode wall (solid): wall-tangent v_r and H_r.
-  # [315, end] Outer domain boundary beyond the anode (free outflow / neumann).
+  # ── Outer wall (r = r_outer) ─────────────────────────────────────────────
   m_hi:
-    - range: [0, 314]
-      rho:   neumann
+    - rho:   neumann
       v_z:   neumann
       v_r:   "v_z * r_z"
       v_phi: neumann
@@ -133,23 +184,21 @@ boundary_conditions:
       H_r:   "H_z * r_z"
       H_phi: neumann
 
-    - range: [315, -1]
-      rho:   neumann
-      v_z:   neumann
-      v_r:   neumann
-      v_phi: neumann
-      e:     neumann
-      H_z:   neumann
-      H_r:   neumann
-      H_phi: neumann
-
-  # ── Inner boundary (cathode + axis) ──────────────────────────────────────
+  # ── Inner wall + axis (r = r_inner, then axis of symmetry) ───────────────
   #
-  # [0, 314]   Cathode wall (solid): wall-tangent v_r and H_r.
-  # [315, 414] Cathode wall beyond the anode (same solid wall).
-  # [415, end] Axis of symmetry: LF update for rho/v_z/e/H_z; zero for v_r/v_phi/H_r/H_phi.
+  # Three segments in l-direction (global l index along the M_LO face):
+  #
+  #   [0, 235]    Solid cathode wall. Was calculated as L_max * (z_center - transition_half_width) + 3 cells for robustness
+  #               Wall-tangent uses NEIGHBOUR slope (M_LO convention).
+  #
+  #   [236, 263]  Cathode tip / injection region.
+  #               Fixed density, energy, and H_z; wall-tangent for H_r.
+  #
+  #   [264, end]  Axis of symmetry (r → 0).
+  #               Lax–Friedrichs update for rho, v_z, e, H_z.
+  #               All other components are zero by symmetry.
   m_lo:
-    - range: [0, 414]
+    - range: [0, 235]
       rho:   neumann
       v_z:   neumann
       v_r:   "v_z_nb * r_z_nb"
@@ -159,7 +208,17 @@ boundary_conditions:
       H_r:   "H_z_nb * r_z_nb"
       H_phi: neumann
 
-    - range: [415, -1]
+    - range: [236, 263]
+      rho:   { dirichlet: 0.1 }
+      v_z:   neumann
+      v_r:   neumann
+      v_phi: { dirichlet: 0.0 }
+      e:     "beta / (2 * (gamma - 1))"
+      H_z:   neumann
+      H_r:   "H_z_nb * r_z_nb"
+      H_phi: neumann
+
+    - range: [264, -1]
       rho:   axis_lf
       v_z:   axis_lf
       v_r:   { dirichlet: 0.0 }

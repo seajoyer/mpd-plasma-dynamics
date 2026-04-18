@@ -10,6 +10,7 @@
 #include "geometry_registry.hpp"
 #include "grid.hpp"
 #include "ics/expression_ic.hpp"
+#include "integrals.hpp"
 #include "io_manager.hpp"
 #include "mpi_manager.hpp"
 #include "solver.hpp"
@@ -41,8 +42,8 @@ auto main(int argc, char* argv[]) -> int {
         std::printf("Config file         : %s\n", config_path);
         std::printf("Grid                : %d x %d  (L x M)\n", cfg.L_max, cfg.M_max);
         std::printf("Initial dt / T end  : %.6e / %.4f\n", cfg.dt, cfg.T);
-        std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n",
-                    mpi.size, mpi.dims[0], mpi.dims[1]);
+        std::printf("MPI ranks           : %d  (%d x %d Cartesian)\n", mpi.size,
+                    mpi.dims[0], mpi.dims[1]);
         std::printf("Geometry            : %s\n", cfg.geometry.type.c_str());
 
         if (cfg.adaptive_dt) {
@@ -76,7 +77,9 @@ auto main(int argc, char* argv[]) -> int {
     // before it silently corrupts physics results.  A FAIL here must
     // be resolved before proceeding.
     // ----------------------------------------------------------------
-    if (mpi.rank == 0) { std::printf("\n--- Layer-1 verification ---\n"); }
+    if (mpi.rank == 0) {
+        std::printf("\n--- Layer-1 verification ---\n");
+    }
     const bool ghost_ok = Verification::CheckGhostExchange(mpi, cfg);
     if (!ghost_ok) {
         // Ghost exchange errors make all subsequent results meaningless.
@@ -110,8 +113,8 @@ auto main(int argc, char* argv[]) -> int {
     // ----------------------------------------------------------------
     // 5. Build grid and initialise fields
     // ----------------------------------------------------------------
-    Grid grid(cfg, mpi.local_L_with_ghosts, mpi.l_start,
-              mpi.local_M_with_ghosts, mpi.m_start, *geometry);
+    Grid grid(cfg, mpi.local_L_with_ghosts, mpi.l_start, mpi.local_M_with_ghosts,
+              mpi.m_start, *geometry);
 
     Fields fields(mpi.local_L_with_ghosts, mpi.local_M_with_ghosts,
                   cfg.convergence_threshold > 0.0);
@@ -145,7 +148,9 @@ auto main(int argc, char* argv[]) -> int {
     Verification::PrintIntegralsHeader(mpi.rank);
     Verification::PrintIntegrals(integrals_ref, 0, 0.0, mpi.rank);
 
-    if (mpi.rank == 0) { std::printf("----------------------------\n\n"); }
+    if (mpi.rank == 0) {
+        std::printf("----------------------------\n\n");
+    }
 
     // ----------------------------------------------------------------
     // 6. Construct solver and I/O manager
@@ -174,12 +179,11 @@ auto main(int argc, char* argv[]) -> int {
     const int check_m_local = owns_checkpoint ? (check_m_global - mpi.m_start + 1) : -1;
 
     if (mpi.rank == 0) {
-        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
-                    "t", "dt", "rho", "v_z", "v_phi", "e", "H_phi");
-        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n",
+        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n", "t", "dt", "rho",
+                    "v_z", "v_phi", "e", "H_phi");
+        std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n", "--------------",
                     "--------------", "--------------", "--------------",
-                    "--------------", "--------------", "--------------",
-                    "--------------");
+                    "--------------", "--------------", "--------------");
     }
 
     if (cfg.vtk_step > 0) {
@@ -218,8 +222,8 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (step_count % 100 == 0) {
-            Diagnostics::CheckCfl(fields, cfg, mpi, mpi.local_L, mpi.local_M,
-                                  dt, step_count);
+            Diagnostics::CheckCfl(fields, cfg, mpi, mpi.local_L, mpi.local_M, dt,
+                                  step_count);
         }
 
         if (cfg.vtk_step > 0 && step_count % cfg.vtk_step == 0) {
@@ -230,21 +234,19 @@ auto main(int argc, char* argv[]) -> int {
             // ---- Physics checkpoint (existing) ----
             double local_vals[5] = {0, 0, 0, 0, 0};
             if (owns_checkpoint) {
-                local_vals[0] = fields.rho  [check_l_local][check_m_local];
-                local_vals[1] = fields.v_z  [check_l_local][check_m_local];
+                local_vals[0] = fields.rho[check_l_local][check_m_local];
+                local_vals[1] = fields.v_z[check_l_local][check_m_local];
                 local_vals[2] = fields.v_phi[check_l_local][check_m_local];
-                local_vals[3] = fields.e    [check_l_local][check_m_local];
+                local_vals[3] = fields.e[check_l_local][check_m_local];
                 local_vals[4] = fields.H_phi[check_l_local][check_m_local];
             }
             double global_vals[5];
             MPI_Reduce(local_vals, global_vals, 5, MPI_DOUBLE, MPI_SUM, 0,
                        MPI_COMM_WORLD);
             if (mpi.rank == 0) {
-                std::printf(
-                    "%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
-                    t, dt,
-                    global_vals[0], global_vals[1], global_vals[2],
-                    global_vals[3], global_vals[4]);
+                std::printf("%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
+                            t, dt, global_vals[0], global_vals[1], global_vals[2],
+                            global_vals[3], global_vals[4]);
             }
 
             // ---- Verification: append a row to the integral table ----
@@ -255,27 +257,36 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     if (mpi.rank == 0) {
-        std::printf("\nCalculation time : %.3f sec  (%d steps)\n",
-                    mpi.Wtime() - begin, step_count);
+        std::printf("\nCalculation time : %.3f sec  (%d steps)\n", mpi.Wtime() - begin,
+                    step_count);
     }
 
     io.WriteFrame(step_count, fields, grid);
 
     if (mpi.rank == 0) {
-        std::printf("Final VTK written : %s/step_%04d.vtk\n",
-                    io.RunDir().c_str(), step_count);
+        std::printf("Final VTK written : %s/step_%04d.vtk\n", io.RunDir().c_str(),
+                    step_count);
     }
 
-    // ----------------------------------------------------------------
-    // Final verification: report total integral drift from step 0.
-    //
-    // For open BCs a non-zero drift is expected; look for consistency
-    // (smooth monotonic drift) rather than conservation.  A sudden
-    // spike compared to the per-step table rows above flags a bug.
-    // ----------------------------------------------------------------
-    const auto integrals_final =
-        Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+    const auto integrals_final = Verification::ComputeIntegrals(fields, grid, cfg, mpi);
     Verification::ReportDrift(integrals_ref, integrals_final, step_count, t, mpi.rank);
+
+    // ----------------------------------------------------------------
+    // Outlet-plane diagnostics: mass flux and thrust.
+    //
+    // Both are MPI-collective; only ranks owning the outlet column
+    // (coords[0] == dims[0]-1) contribute, but every rank must call
+    // them because an MPI_Allreduce is performed internally.
+    // ----------------------------------------------------------------
+    const double mass_flux = Diagnostics::GetMassFlux(fields, grid, cfg, mpi);
+    const double thrust = Diagnostics::GetThrust(fields, grid, cfg, mpi);
+
+    if (mpi.rank == 0) {
+        std::printf("\n--- Outlet-plane diagnostics ---\n");
+        std::printf("Mass flux : %.6e\n", mass_flux);
+        std::printf("Thrust    : %.6e\n", thrust);
+        std::printf("--------------------------------\n");
+    }
 
     return 0;
 }
