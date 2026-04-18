@@ -22,8 +22,29 @@ struct GeometryConfig {
 // Initial-condition configuration
 // ============================================================
 
+/// Configuration for the initial condition.
+///
+/// Two mutually exclusive modes:
+///
+///   VTK restart
+///     Set vtk_file to a non-empty path.  VtkIC reads the structured-grid
+///     VTK file written by IOManager::WriteFrame and interpolates all eight
+///     physical fields onto the current computational grid.
+///
+///     YAML:
+///       initial_conditions:
+///         vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
+///
+///   Expression IC (default when vtk_file is empty)
+///     params_yaml holds the raw YAML text of the initial_conditions node,
+///     forwarded to ExpressionIC.  Any field not specified falls back to the
+///     built-in defaults (rho=1, v_z=0, …).
+///
+/// When vtk_file is set, any expression fields listed alongside it are
+/// silently ignored — VTK data takes full precedence.
 struct ICConfig {
-    std::string params_yaml;   ///< empty → all built-in field defaults
+    std::string vtk_file;      ///< non-empty → use VtkIC; empty → use ExpressionIC
+    std::string params_yaml;   ///< ExpressionIC only; empty → all built-in defaults
 };
 
 // ============================================================

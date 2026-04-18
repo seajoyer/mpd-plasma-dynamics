@@ -348,9 +348,27 @@ void SimConfig::Load(const std::string& path) {
                 "      rho: 1.0\n"
                 "      v_z: 0.1");
         }
-        std::ostringstream oss;
-        oss << n;
-        initial_conditions.params_yaml = oss.str();
+
+        // VTK restart path — mutually exclusive with expression fields.
+        if (n["vtk_file"]) {
+            const auto& vf = n["vtk_file"];
+            if (!vf.IsScalar()) {
+                throw std::runtime_error(
+                    "config: 'initial_conditions.vtk_file' must be a scalar "
+                    "file-path string.\n"
+                    "  Example:\n"
+                    "    initial_conditions:\n"
+                    "      vtk_file: \"output/run_.../step_5000.vtk\"");
+            }
+            initial_conditions.vtk_file = vf.as<std::string>();
+            // Expression fields alongside vtk_file are silently ignored;
+            // we do NOT serialise params_yaml so ExpressionIC is never built.
+        } else {
+            // Expression IC: serialise the whole node for ExpressionIC.
+            std::ostringstream oss;
+            oss << n;
+            initial_conditions.params_yaml = oss.str();
+        }
     }
 
     // ---- boundary conditions -----------------------------------------------

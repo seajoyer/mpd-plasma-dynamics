@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 
 #include "config.hpp"
 #include "diagnostics.hpp"
@@ -10,6 +11,8 @@
 #include "geometry_registry.hpp"
 #include "grid.hpp"
 #include "ics/expression_ic.hpp"
+#include "ics/vtk_ic.hpp"
+#include "iinitial_condition.hpp"
 #include "integrals.hpp"
 #include "io_manager.hpp"
 #include "mpi_manager.hpp"
@@ -99,16 +102,38 @@ auto main(int argc, char* argv[]) -> int {
     // ----------------------------------------------------------------
     // 4. Build initial condition
     //
-    // ExpressionIC is the sole IC implementation.  Its YAML params node
-    // is forwarded directly; an empty / absent params block is valid and
-    // causes ExpressionIC to fall back to its built-in field defaults.
+    // Two modes, selected by the presence of initial_conditions.vtk_file:
+    //
+    //   VTK restart  — VtkIC reads a structured-grid VTK file written by
+    //                  IOManager::WriteFrame and bilinearly interpolates all
+    //                  eight physical fields onto the current grid.  Supports
+    //                  same-resolution restarts (exact lookup) and remapping
+    //                  to a different L_max / M_max (bilinear interpolation).
+    //
+    //   Expression IC (default) — ExpressionIC evaluates per-field math
+    //                  expressions cell-by-cell.  An empty params block falls
+    //                  back to built-in defaults (rho=1, v_z=0, …).
     // ----------------------------------------------------------------
-    YAML::Node ic_params;
-    if (!cfg.initial_conditions.params_yaml.empty()) {
-        ic_params = YAML::Load(cfg.initial_conditions.params_yaml);
-    }
+    std::unique_ptr<IInitialCondition> ic;
 
-    const ExpressionIC ic(ic_params);
+    if (!cfg.initial_conditions.vtk_file.empty()) {
+        if (mpi.rank == 0) {
+            std::printf("IC                  : VTK restart  '%s'\n",
+                        cfg.initial_conditions.vtk_file.c_str());
+        }
+        // Every rank constructs VtkIC independently; the file must be on a
+        // shared filesystem accessible from all compute nodes.
+        ic = std::make_unique<VtkIC>(cfg.initial_conditions.vtk_file);
+    } else {
+        YAML::Node ic_params;
+        if (!cfg.initial_conditions.params_yaml.empty()) {
+            ic_params = YAML::Load(cfg.initial_conditions.params_yaml);
+        }
+        if (mpi.rank == 0) {
+            std::printf("IC                  : expression\n");
+        }
+        ic = std::make_unique<ExpressionIC>(ic_params);
+    }
 
     // ----------------------------------------------------------------
     // 5. Build grid and initialise fields
@@ -119,7 +144,7 @@ auto main(int argc, char* argv[]) -> int {
     Fields fields(mpi.local_L_with_ghosts, mpi.local_M_with_ghosts,
                   cfg.convergence_threshold > 0.0);
 
-    fields.InitPhysical(ic, cfg, grid, mpi.l_start);
+    fields.InitPhysical(*ic, cfg, grid, mpi.l_start);
     fields.InitConservative(grid);
 
     if (cfg.convergence_threshold > 0.0) {

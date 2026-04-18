@@ -38,8 +38,9 @@ add_executable(${PROJECT_NAME}
     src/geometries/short_cathode_cosine.cpp
     src/geometries/villani_mpdt.cpp
 
-    # IC implementation
+    # IC implementations
     src/ics/expression_ic.cpp
+    src/ics/vtk_ic.cpp
 )
 
 target_include_directories(${PROJECT_NAME}

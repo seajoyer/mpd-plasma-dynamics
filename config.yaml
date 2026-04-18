@@ -9,7 +9,7 @@ time:
 
 adaptive_dt:
   enabled:       true
-  cfl_number:    0.5
+  cfl_number:    0.45
   growth_factor: 1.10
   dt_min:        1.0e-10
   dt_max:        5.0e-5
@@ -55,19 +55,33 @@ geometry:
     r_inner_after:          0.005
     r_outer:                0.800
 
-  # params:
-  #   z_center:               0.31
-  #   transition_half_width:  0.02
-  #   r_inner_before:         0.086
-  #   r_inner_after:          0.002
-  #   r_outer:                0.350
-
 # ── Initial conditions ────────────────────────────────────────────────────────
+#
+# ── Mode A: expression IC (default) ──────────────────────────────────────────
 #
 # Fields are specified as mathematical expressions evaluated cell-by-cell.
 # Derived fields (p, P) are computed automatically from the primaries.
 #
-# ── Available symbols ─────────────────────────────────────────────────────────
+# ── Mode B: VTK restart ───────────────────────────────────────────────────────
+#
+# Set vtk_file to the path of a step_NNNN.vtk file written by a previous run.
+# All eight physical fields are read from the file and bilinearly interpolated
+# onto the current grid.  This supports:
+#
+#   • Exact restart  — same L_max / M_max: field values are copied 1-to-1,
+#                      with no floating-point blending.
+#   • Resolution remap — different L_max / M_max: values are interpolated
+#                      in fractional (z/L, m/M_max) space so features are
+#                      preserved across refinement or coarsening.
+#
+# The file must be accessible from every MPI rank (shared/NFS filesystem).
+# Any expression fields listed alongside vtk_file are silently ignored.
+#
+# Example:
+#   initial_conditions:
+#     vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
+#
+# ── Available symbols for expression IC ──────────────────────────────────────
 #
 #   Physics constants  (from the [physics] block)
 #     gamma   beta   H_z0   r_0
