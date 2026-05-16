@@ -81,16 +81,19 @@ void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
     #pragma omp parallel for collapse(2)
     for (int l = l_lo; l <= l_hi; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
-            rho  [l][m] = u_1[l][m] / grid.r[l][m];
-            v_z  [l][m] = u_2[l][m] / u_1[l][m];
-            v_r  [l][m] = u_3[l][m] / u_1[l][m];
-            v_phi[l][m] = u_4[l][m] / u_1[l][m];
+            const double inv_r  = 1.0 / grid.r[l][m];
+            const double inv_u1 = 1.0 / u_1[l][m];
+
+            rho  [l][m] = u_1[l][m] * inv_r;
+            v_z  [l][m] = u_2[l][m] * inv_u1;
+            v_r  [l][m] = u_3[l][m] * inv_u1;
+            v_phi[l][m] = u_4[l][m] * inv_u1;
 
             H_phi[l][m] = u_6[l][m];
-            H_z  [l][m] = u_7[l][m] / grid.r[l][m];
-            H_r  [l][m] = u_8[l][m] / grid.r[l][m];
+            H_z  [l][m] = u_7[l][m] * inv_r;
+            H_r  [l][m] = u_8[l][m] * inv_r;
 
-            e[l][m] = u_5[l][m] / u_1[l][m];
+            e[l][m] = u_5[l][m] * inv_u1;
             p[l][m] = (gamma - 1.0) * rho[l][m] * e[l][m];
             P[l][m] = p[l][m] + 0.5 * (H_z[l][m]*H_z[l][m]
                                        + H_r[l][m]*H_r[l][m]
@@ -107,16 +110,19 @@ void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
     #pragma omp parallel for collapse(2)
     for (int l = l_lo; l <= l_hi; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
-            rho  [l][m] = u0_1[l][m] / grid.r[l][m];
-            v_z  [l][m] = u0_2[l][m] / u0_1[l][m];
-            v_r  [l][m] = u0_3[l][m] / u0_1[l][m];
-            v_phi[l][m] = u0_4[l][m] / u0_1[l][m];
+            const double inv_r  = 1.0 / grid.r[l][m];
+            const double inv_u1 = 1.0 / u0_1[l][m];
+
+            rho  [l][m] = u0_1[l][m] * inv_r;
+            v_z  [l][m] = u0_2[l][m] * inv_u1;
+            v_r  [l][m] = u0_3[l][m] * inv_u1;
+            v_phi[l][m] = u0_4[l][m] * inv_u1;
 
             H_phi[l][m] = u0_6[l][m];
-            H_z  [l][m] = u0_7[l][m] / grid.r[l][m];
-            H_r  [l][m] = u0_8[l][m] / grid.r[l][m];
+            H_z  [l][m] = u0_7[l][m] * inv_r;
+            H_r  [l][m] = u0_8[l][m] * inv_r;
 
-            e[l][m] = u0_5[l][m] / u0_1[l][m];
+            e[l][m] = u0_5[l][m] * inv_u1;
             p[l][m] = (gamma - 1.0) * rho[l][m] * e[l][m];
             P[l][m] = p[l][m] + 0.5 * (H_z[l][m]*H_z[l][m]
                                        + H_r[l][m]*H_r[l][m]

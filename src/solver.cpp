@@ -1,6 +1,7 @@
 #include "solver.hpp"
 
 #include <cmath>
+#include <utility>
 
 // ============================================================
 // Constructor — build FaceBC objects from config
@@ -50,7 +51,15 @@ void Solver::Advance(double dt) {
     if (mpi_.IsMHiBoundary()) {
         f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
     }
-    f_.CopyUToU0();
+
+    std::swap(f_.u_1, f_.u0_1);
+    std::swap(f_.u_2, f_.u0_2);
+    std::swap(f_.u_3, f_.u0_3);
+    std::swap(f_.u_4, f_.u0_4);
+    std::swap(f_.u_5, f_.u0_5);
+    std::swap(f_.u_6, f_.u0_6);
+    std::swap(f_.u_7, f_.u0_7);
+    std::swap(f_.u_8, f_.u0_8);
 }
 
 // ============================================================
@@ -118,69 +127,70 @@ void Solver::ComputeCentralUpdate() {
     auto** H_phi = f_.H_phi.Raw();
     auto** r     = grid_.r.Raw();
     const double* dr = grid_.dr.data();
+    const double dt_inv_2dz = dt / (2.0 * dz);
 
     #pragma omp parallel for collapse(2)
     for (int l = 1; l <= local_L; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
-            const double dr_l = dr[l];
+            const double dt_inv_2drl = dt / (2.0 * dr[l]);
 
             u_1[l][m] =
                 0.25 * (u0_1[l+1][m] + u0_1[l-1][m] + u0_1[l][m+1] + u0_1[l][m-1])
-                + dt * (-(u0_1[l+1][m]*v_z[l+1][m] - u0_1[l-1][m]*v_z[l-1][m]) / (2*dz)
-                        -(u0_1[l][m+1]*v_r[l][m+1]  - u0_1[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                - dt_inv_2dz  * (u0_1[l+1][m]*v_z[l+1][m] - u0_1[l-1][m]*v_z[l-1][m])
+                - dt_inv_2drl * (u0_1[l][m+1]*v_r[l][m+1] - u0_1[l][m-1]*v_r[l][m-1]);
 
             u_2[l][m] =
                 0.25 * (u0_2[l+1][m] + u0_2[l-1][m] + u0_2[l][m+1] + u0_2[l][m-1])
-                + dt * (( (H_z[l+1][m]*H_z[l+1][m] - P[l+1][m])*r[l+1][m]
-                         -(H_z[l-1][m]*H_z[l-1][m] - P[l-1][m])*r[l-1][m]) / (2*dz)
-                        +( H_z[l][m+1]*H_r[l][m+1]*r[l][m+1]
-                          -H_z[l][m-1]*H_r[l][m-1]*r[l][m-1]) / (2*dr_l)
-                        -(u0_2[l+1][m]*v_z[l+1][m] - u0_2[l-1][m]*v_z[l-1][m]) / (2*dz)
-                        -(u0_2[l][m+1]*v_r[l][m+1]  - u0_2[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                + dt_inv_2dz  * ( (H_z[l+1][m]*H_z[l+1][m] - P[l+1][m])*r[l+1][m]
+                                 -(H_z[l-1][m]*H_z[l-1][m] - P[l-1][m])*r[l-1][m])
+                + dt_inv_2drl * ( H_z[l][m+1]*H_r[l][m+1]*r[l][m+1]
+                                 -H_z[l][m-1]*H_r[l][m-1]*r[l][m-1])
+                - dt_inv_2dz  * (u0_2[l+1][m]*v_z[l+1][m] - u0_2[l-1][m]*v_z[l-1][m])
+                - dt_inv_2drl * (u0_2[l][m+1]*v_r[l][m+1] - u0_2[l][m-1]*v_r[l][m-1]);
 
             u_3[l][m] =
                 0.25 * (u0_3[l+1][m] + u0_3[l-1][m] + u0_3[l][m+1] + u0_3[l][m-1])
-                + dt * ((rho[l][m]*v_phi[l][m]*v_phi[l][m] + P[l][m] - H_phi[l][m]*H_phi[l][m])
-                        +( H_z[l+1][m]*H_r[l+1][m]*r[l+1][m]
-                          -H_z[l-1][m]*H_r[l-1][m]*r[l-1][m]) / (2*dz)
-                        +( (H_r[l][m+1]*H_r[l][m+1] - P[l][m+1])*r[l][m+1]
-                          -(H_r[l][m-1]*H_r[l][m-1] - P[l][m-1])*r[l][m-1]) / (2*dr_l)
-                        -(u0_3[l+1][m]*v_z[l+1][m] - u0_3[l-1][m]*v_z[l-1][m]) / (2*dz)
-                        -(u0_3[l][m+1]*v_r[l][m+1]  - u0_3[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                + dt * (rho[l][m]*v_phi[l][m]*v_phi[l][m] + P[l][m] - H_phi[l][m]*H_phi[l][m])
+                + dt_inv_2dz  * ( H_z[l+1][m]*H_r[l+1][m]*r[l+1][m]
+                                 -H_z[l-1][m]*H_r[l-1][m]*r[l-1][m])
+                + dt_inv_2drl * ( (H_r[l][m+1]*H_r[l][m+1] - P[l][m+1])*r[l][m+1]
+                                 -(H_r[l][m-1]*H_r[l][m-1] - P[l][m-1])*r[l][m-1])
+                - dt_inv_2dz  * (u0_3[l+1][m]*v_z[l+1][m] - u0_3[l-1][m]*v_z[l-1][m])
+                - dt_inv_2drl * (u0_3[l][m+1]*v_r[l][m+1] - u0_3[l][m-1]*v_r[l][m-1]);
 
             u_4[l][m] =
                 0.25 * (u0_4[l+1][m] + u0_4[l-1][m] + u0_4[l][m+1] + u0_4[l][m-1])
-                + dt * ((-rho[l][m]*v_r[l][m]*v_phi[l][m] + H_phi[l][m]*H_r[l][m])
-                        +( H_phi[l+1][m]*H_z[l+1][m]*r[l+1][m]
-                          -H_phi[l-1][m]*H_z[l-1][m]*r[l-1][m]) / (2*dz)
-                        +( H_phi[l][m+1]*H_r[l][m+1]*r[l][m+1]
-                          -H_phi[l][m-1]*H_r[l][m-1]*r[l][m-1]) / (2*dr_l)
-                        -(u0_4[l+1][m]*v_z[l+1][m] - u0_4[l-1][m]*v_z[l-1][m]) / (2*dz)
-                        -(u0_4[l][m+1]*v_r[l][m+1]  - u0_4[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                + dt * (-rho[l][m]*v_r[l][m]*v_phi[l][m] + H_phi[l][m]*H_r[l][m])
+                + dt_inv_2dz  * ( H_phi[l+1][m]*H_z[l+1][m]*r[l+1][m]
+                                 -H_phi[l-1][m]*H_z[l-1][m]*r[l-1][m])
+                + dt_inv_2drl * ( H_phi[l][m+1]*H_r[l][m+1]*r[l][m+1]
+                                 -H_phi[l][m-1]*H_r[l][m-1]*r[l][m-1])
+                - dt_inv_2dz  * (u0_4[l+1][m]*v_z[l+1][m] - u0_4[l-1][m]*v_z[l-1][m])
+                - dt_inv_2drl * (u0_4[l][m+1]*v_r[l][m+1] - u0_4[l][m-1]*v_r[l][m-1]);
 
             u_5[l][m] =
                 0.25 * (u0_5[l+1][m] + u0_5[l-1][m] + u0_5[l][m+1] + u0_5[l][m-1])
-                + dt * (-p[l][m] * ((v_z[l+1][m]*r[l+1][m] - v_z[l-1][m]*r[l-1][m]) / (2*dz)
-                                   +(v_r[l][m+1]*r[l][m+1]  - v_r[l][m-1]*r[l][m-1])  / (2*dr_l))
-                        -(u0_5[l+1][m]*v_z[l+1][m] - u0_5[l-1][m]*v_z[l-1][m]) / (2*dz)
-                        -(u0_5[l][m+1]*v_r[l][m+1]  - u0_5[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                - p[l][m] * (dt_inv_2dz  * (v_z[l+1][m]*r[l+1][m] - v_z[l-1][m]*r[l-1][m])
+                            + dt_inv_2drl * (v_r[l][m+1]*r[l][m+1] - v_r[l][m-1]*r[l][m-1]))
+                - dt_inv_2dz  * (u0_5[l+1][m]*v_z[l+1][m] - u0_5[l-1][m]*v_z[l-1][m])
+                - dt_inv_2drl * (u0_5[l][m+1]*v_r[l][m+1] - u0_5[l][m-1]*v_r[l][m-1]);
 
             u_6[l][m] =
                 0.25 * (u0_6[l+1][m] + u0_6[l-1][m] + u0_6[l][m+1] + u0_6[l][m-1])
-                + dt * ((H_z[l+1][m]*v_phi[l+1][m] - H_z[l-1][m]*v_phi[l-1][m]) / (2*dz)
-                       +(H_r[l][m+1]*v_phi[l][m+1]  - H_r[l][m-1]*v_phi[l][m-1])  / (2*dr_l)
-                        -(u0_6[l+1][m]*v_z[l+1][m] - u0_6[l-1][m]*v_z[l-1][m]) / (2*dz)
-                        -(u0_6[l][m+1]*v_r[l][m+1]  - u0_6[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                + dt_inv_2dz  * (H_z[l+1][m]*v_phi[l+1][m] - H_z[l-1][m]*v_phi[l-1][m])
+                + dt_inv_2drl * (H_r[l][m+1]*v_phi[l][m+1] - H_r[l][m-1]*v_phi[l][m-1])
+                - dt_inv_2dz  * (u0_6[l+1][m]*v_z[l+1][m] - u0_6[l-1][m]*v_z[l-1][m])
+                - dt_inv_2drl * (u0_6[l][m+1]*v_r[l][m+1] - u0_6[l][m-1]*v_r[l][m-1]);
 
             u_7[l][m] =
                 0.25 * (u0_7[l+1][m] + u0_7[l-1][m] + u0_7[l][m+1] + u0_7[l][m-1])
-                + dt * ((H_r[l][m+1]*v_z[l][m+1]*r[l][m+1] - H_r[l][m-1]*v_z[l][m-1]*r[l][m-1]) / (2*dr_l)
-                        -(u0_7[l][m+1]*v_r[l][m+1]  - u0_7[l][m-1]*v_r[l][m-1])  / (2*dr_l));
+                + dt_inv_2drl * (H_r[l][m+1]*v_z[l][m+1]*r[l][m+1] - H_r[l][m-1]*v_z[l][m-1]*r[l][m-1])
+                - dt_inv_2drl * (u0_7[l][m+1]*v_r[l][m+1] - u0_7[l][m-1]*v_r[l][m-1]);
 
             u_8[l][m] =
                 0.25 * (u0_8[l+1][m] + u0_8[l-1][m] + u0_8[l][m+1] + u0_8[l][m-1])
-                + dt * ((H_z[l+1][m]*v_r[l+1][m]*r[l+1][m] - H_z[l-1][m]*v_r[l-1][m]*r[l-1][m]) / (2*dz)
-                        -(u0_8[l+1][m]*v_z[l+1][m] - u0_8[l-1][m]*v_z[l-1][m]) / (2*dz));
+                + dt_inv_2dz * (H_z[l+1][m]*v_r[l+1][m]*r[l+1][m] - H_z[l-1][m]*v_r[l-1][m]*r[l-1][m])
+                - dt_inv_2dz * (u0_8[l+1][m]*v_z[l+1][m] - u0_8[l-1][m]*v_z[l-1][m]);
         }
     }
 }
