@@ -32,19 +32,30 @@ grid:
   L_max: 800
   M_max: 400
 
+# ── Diagnostics ──────────────────────────────────────────────────────────────
+#
+# All five toggles below control purely observational features.  Disabling
+# them changes no physical or numerical result — only what's computed and
+# printed for monitoring.  For maximum performance set every flag to false.
+#
+diagnostics:
+  cfl_check:            true   # CheckCfl every 100 steps (MaxWaveSpeed Allreduce)
+  conserved_integrals:  true   # Conserved-integral table every 1000 steps + final drift report
+  console_checkpoint:   true   # Per-1000-step (t, dt, rho, v_z, ...) row
+  outlet_diagnostics:   true   # Final mass-flux and thrust at the outlet plane
+  startup_verification: true   # Ghost-exchange round-trip and radial-symmetry checks at startup
+  write_mpi_rank:       true   # Include MPI_Rank scalar array in VTK frames for decomposition visualisation
+
 # ── Geometry ─────────────────────────────────────────────────────────────────
 #
 #   short_cathode_cosine
-#     C¹ cosine-smoothed throat transition (recommended).
+#     C¹ cosine-smoothed throat transition.
 #     params:
 #       z_center:               0.31    # axial centre of the cosine transition
 #       transition_half_width:  0.015   # half-width of the transition band
 #       r_inner_before:         0.200   # cathode-face inner radius
 #       r_inner_after:          0.005   # thin-electrode inner radius
 #       r_outer:                0.800   # anode (outer wall) radius
-#
-# Omitting the params block (or any individual key) uses the default values
-# shown above — the simulation is unchanged from the previous hard-coded behaviour.
 #
 geometry:
   type: short_cathode_cosine
@@ -86,7 +97,7 @@ geometry:
 #   Physics constants  (from the [physics] block)
 #     gamma   beta   H_z0   r_0
 #
-#   Spatial variables  (cell-local, read-only)
+#   Spatial variables  (cell-local)
 #     z       axial coordinate  [l_global × dz]
 #     r       radial coordinate [grid.r[l][m]]
 #     r_z     dr/dz skew metric [grid.r_z[l][m]]
@@ -106,7 +117,9 @@ geometry:
 #   Each expression may reference fields earlier in this sequence.
 #
 initial_conditions:
-  rho:   0.1
+#  initial_conditions:
+#    vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
+  rho:   1.0
   v_z:   0.1
   v_r:   0.1
   v_phi: 0.0
@@ -155,7 +168,7 @@ initial_conditions:
 #   Neighbour cell: r_nb  r_z_nb
 #   Neighbour fields: rho_nb  v_z_nb  v_r_nb  v_phi_nb  e_nb
 #                     H_z_nb  H_r_nb  H_phi_nb
-#   Boundary values (evaluation order, cross-field references):
+#   Boundary values (evaluation order):
 #                     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
 #
 # Free-axis convention
@@ -223,7 +236,7 @@ boundary_conditions:
       H_phi: neumann
 
     - range: [236, 263]
-      rho:   { dirichlet: 0.1 }
+      rho:   { dirichlet: 1.0 }
       v_z:   neumann
       v_r:   neumann
       v_phi: { dirichlet: 0.0 }

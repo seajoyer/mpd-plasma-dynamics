@@ -61,7 +61,6 @@ auto ShortCathodeCosineGeometry::DrInnerDz(double z) const -> double {
     if (z < z_start_ || z >= z_end_) {
         return 0.0;
     }
-    // d/dz [ ½(1 − cos(π·ξ)) ] = ½·π·sin(π·ξ) · dξ/dz,   dξ/dz = inv_width_
     const double xi = (z - z_start_) * inv_width_;
     return delta_r_ * 0.5 * M_PI * std::sin(M_PI * xi) * inv_width_;
 }

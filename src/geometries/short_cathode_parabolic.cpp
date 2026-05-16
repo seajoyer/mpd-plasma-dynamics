@@ -83,7 +83,6 @@ auto ShortCathodeParabolicGeometry::DrInnerDz(double z) const -> double {
     if (z < p_.z_throat) {
         return -2.0 * A_ * (z - p_.z_flat_end);
     }
-    // z_throat ≤ z < z_thin_start
     return  2.0 * A_ * (z - z_arc_center_);
 }
 

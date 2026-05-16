@@ -182,7 +182,10 @@ void IOManager::GatherGlobal(const Fields& f, const Grid& grid) {
             UnpackIntoGlobal(*global_fields[fi], buf, gl, gm, local_L, local_M);
         }
         // Rank field: no send/recv needed — stamp rank 0's block directly.
-        FillRankBlock(rank_g_, 0.0, gl, gm, local_L, local_M);
+
+        if (cfg_.diagnostics.write_mpi_rank) {
+            FillRankBlock(rank_g_, 0.0, gl, gm, local_L, local_M);
+        };
     }
 
     // ---------- rank 0: receive from all other ranks ---------------------
@@ -207,7 +210,9 @@ void IOManager::GatherGlobal(const Fields& f, const Grid& grid) {
         }
         // Rank field: the envelope already tells us the owning rank — no
         // extra message required.
-        FillRankBlock(rank_g_, static_cast<double>(src), gl, gm, block_L, block_M);
+        if (cfg_.diagnostics.write_mpi_rank) {
+            FillRankBlock(rank_g_, static_cast<double>(src), gl, gm, block_L, block_M);
+        };
     }
 }
 
@@ -281,7 +286,9 @@ void IOManager::WriteVtk(const std::string& filepath) const {
     // Each cell is coloured by the rank that owns it.  In ParaView, apply
     // a "Surface" representation with the "MPI_Rank" array and a categorical
     // colour map to see individual subdomains at a glance.
-    add_scalar("MPI_Rank", rank_g_);
+    if (cfg_.diagnostics.write_mpi_rank) {
+        add_scalar("MPI_Rank", rank_g_);
+    }
 
     // ---- derived scalars -----------------------------------------------
     {

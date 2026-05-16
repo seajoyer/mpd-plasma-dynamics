@@ -96,7 +96,6 @@ auto VillaniMPDTGeometry::CosineStep(double z, double z_s, double z_e,
 {
     if (z < z_s) return r_before;
     if (z >= z_e) return r_before + delta_r;
-    // Cosine blend: ½(1 − cos(π·ξ)) where ξ ∈ [0, 1]
     const double xi = (z - z_s) * inv_w;
     return r_before + delta_r * 0.5 * (1.0 - std::cos(M_PI * xi));
 }
@@ -105,7 +104,6 @@ auto VillaniMPDTGeometry::CosineStepDeriv(double z, double z_s, double z_e,
                                            double delta_r, double inv_w) noexcept -> double
 {
     if (z < z_s || z >= z_e) return 0.0;
-    // d/dz [ ½(1 − cos(π·ξ)) ] = ½·π·sin(π·ξ) · (1/width)
     const double xi = (z - z_s) * inv_w;
     return delta_r * 0.5 * M_PI * std::sin(M_PI * xi) * inv_w;
 }
@@ -115,7 +113,6 @@ auto VillaniMPDTGeometry::CosineStepDeriv(double z, double z_s, double z_e,
 auto VillaniMPDTGeometry::RInner(double z) const -> double
 {
     if (p_.cathode_tip_half_width <= 0.0) {
-        // Sharp step: cathode radius up to z_cathode, then r_inner_after
         return (z < p_.z_cathode) ? p_.r_cathode : p_.r_inner_after;
     }
     return CosineStep(z, c_z_start_, c_z_end_,
@@ -125,7 +122,6 @@ auto VillaniMPDTGeometry::RInner(double z) const -> double
 auto VillaniMPDTGeometry::ROuter(double z) const -> double
 {
     if (p_.anode_tip_half_width <= 0.0) {
-        // Sharp step: anode radius up to z_anode, then r_outer_domain
         return (z < p_.z_anode) ? p_.r_anode : p_.r_outer_domain;
     }
     return CosineStep(z, a_z_start_, a_z_end_,

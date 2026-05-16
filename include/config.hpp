@@ -163,6 +163,21 @@ struct SimConfig {
     BCFaceConfig bc_m_lo;   ///< r = inner face (wall + axis by default)
     BCFaceConfig bc_m_hi;   ///< r = outer face (wall by default)
 
+    // ---- diagnostics (purely observational; safe to disable for perf) -----
+    /// Per-feature toggles for the five overhead-only diagnostic groups.
+    /// Defaults preserve historical behaviour (everything ON).  Set any
+    /// flag to false to skip the corresponding work; flipping all of them
+    /// to false eliminates every MPI reduction and console print that
+    /// exists solely for observability.
+    struct DiagnosticsConfig {
+        bool cfl_check             = true;   ///< Diagnostics::CheckCfl every 100 steps
+        bool conserved_integrals   = true;   ///< Verification::ComputeIntegrals/PrintIntegrals every 1000 steps + final ReportDrift
+        bool console_checkpoint    = true;   ///< Per-1000-step (t, dt, rho, v_z, ...) row
+        bool outlet_diagnostics    = true;   ///< Final GetMassFlux / GetThrust
+        bool startup_verification  = true;   ///< CheckGhostExchange + CheckRadialSymmetry + initial integrals snapshot
+        bool write_mpi_rank        = true;   ///< Add "MPI_Rank" scalar array to VTK frames
+    } diagnostics;
+
     // ---- derived (computed by load / init) ----
     double dz{};
     double dy{};

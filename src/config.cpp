@@ -315,6 +315,16 @@ void SimConfig::Load(const std::string& path) {
         if (n["mpi_dims_m"])     mpi_dims_m     = n["mpi_dims_m"].as<int>();
     }
 
+    // ---- diagnostics -------------------------------------------------------
+    if (auto n = cfg["diagnostics"]) {
+        if (n["cfl_check"])             diagnostics.cfl_check            = n["cfl_check"].as<bool>();
+        if (n["conserved_integrals"])   diagnostics.conserved_integrals  = n["conserved_integrals"].as<bool>();
+        if (n["console_checkpoint"])    diagnostics.console_checkpoint   = n["console_checkpoint"].as<bool>();
+        if (n["outlet_diagnostics"])    diagnostics.outlet_diagnostics   = n["outlet_diagnostics"].as<bool>();
+        if (n["startup_verification"])  diagnostics.startup_verification = n["startup_verification"].as<bool>();
+        if (n["write_mpi_rank"])        diagnostics.write_mpi_rank       = n["write_mpi_rank"].as<bool>();
+    }
+
     // ---- geometry ----------------------------------------------------------
     if (auto n = cfg["geometry"]) {
         if (n["type"]) geometry.type = n["type"].as<std::string>();

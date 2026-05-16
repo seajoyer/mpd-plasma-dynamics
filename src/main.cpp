@@ -1,3 +1,4 @@
+#include <mpi.h>
 #include <omp.h>
 #include <yaml-cpp/yaml.h>
 
@@ -66,6 +67,21 @@ auto main(int argc, char* argv[]) -> int {
         if (cfg.vtk_step > 0) {
             std::printf("VTK output every    : %d steps\n", cfg.vtk_step);
         }
+
+        // Summarise the diagnostics toggles so it's obvious from the run
+        // log when any of them are off.
+        const auto& d = cfg.diagnostics;
+        if (!d.cfl_check || !d.conserved_integrals || !d.console_checkpoint ||
+            !d.outlet_diagnostics || !d.startup_verification || !d.write_mpi_rank) {
+            std::printf("Diagnostics         : cfl=%s integrals=%s console=%s "
+                        "outlet=%s startup_verif=%s mpi_rank=%s\n",
+                        d.cfl_check            ? "on" : "off",
+                        d.conserved_integrals  ? "on" : "off",
+                        d.console_checkpoint   ? "on" : "off",
+                        d.outlet_diagnostics   ? "on" : "off",
+                        d.startup_verification ? "on" : "off",
+                        d.write_mpi_rank       ? "on" : "off");
+        }
     }
 
     if (cfg.openmp_threads > 0) {
@@ -79,14 +95,19 @@ auto main(int argc, char* argv[]) -> int {
     // allocation — so that an MPI packing or neighbour bug is caught
     // before it silently corrupts physics results.  A FAIL here must
     // be resolved before proceeding.
+    //
+    // Gated by diagnostics.startup_verification: disable only after the
+    // ghost-exchange code is known good for the chosen rank topology.
     // ----------------------------------------------------------------
-    if (mpi.rank == 0) {
-        std::printf("\n--- Layer-1 verification ---\n");
-    }
-    const bool ghost_ok = Verification::CheckGhostExchange(mpi, cfg);
-    if (!ghost_ok) {
-        // Ghost exchange errors make all subsequent results meaningless.
-        MPI_Abort(MPI_COMM_WORLD, 1);
+    if (cfg.diagnostics.startup_verification) {
+        if (mpi.rank == 0) {
+            std::printf("\n--- Layer-1 verification ---\n");
+        }
+        const bool ghost_ok = Verification::CheckGhostExchange(mpi, cfg);
+        if (!ghost_ok) {
+            // Ghost exchange errors make all subsequent results meaningless.
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
     }
 
     // ----------------------------------------------------------------
@@ -159,8 +180,12 @@ auto main(int argc, char* argv[]) -> int {
     // non-zero (radial variation is physical); record this as a baseline
     // to compare against if unexpected symmetry-breaking is suspected.
     // For a 1-D test case (radially-uniform IC) the value should be ~0.
+    //
+    // Gated by diagnostics.startup_verification.
     // ----------------------------------------------------------------
-    Verification::CheckRadialSymmetry(fields, mpi);
+    if (cfg.diagnostics.startup_verification) {
+        Verification::CheckRadialSymmetry(fields, mpi);
+    }
 
     // ----------------------------------------------------------------
     // Verification check 3: conserved-integral tracking.
@@ -168,13 +193,21 @@ auto main(int argc, char* argv[]) -> int {
     // Capture the reference integrals at step 0 so that every subsequent
     // snapshot can report the cumulative drift.  For open BCs a steady
     // monotonic drift is expected; a sudden large jump flags a bug.
+    //
+    // Gated by diagnostics.conserved_integrals — this is the reference
+    // snapshot needed by ReportDrift() at the end of the run, so it
+    // must be paired with the in-loop and final calls below.
     // ----------------------------------------------------------------
-    const auto integrals_ref = Verification::ComputeIntegrals(fields, grid, cfg, mpi);
-    Verification::PrintIntegralsHeader(mpi.rank);
-    Verification::PrintIntegrals(integrals_ref, 0, 0.0, mpi.rank);
+    Verification::ConservedIntegrals integrals_ref{};
 
-    if (mpi.rank == 0) {
-        std::printf("----------------------------\n\n");
+    if (cfg.diagnostics.conserved_integrals) {
+        integrals_ref = Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+        Verification::PrintIntegralsHeader(mpi.rank);
+        Verification::PrintIntegrals(integrals_ref, 0, 0.0, mpi.rank);
+
+        if (mpi.rank == 0) {
+            std::printf("----------------------------\n\n");
+        }
     }
 
     // ----------------------------------------------------------------
@@ -203,7 +236,7 @@ auto main(int argc, char* argv[]) -> int {
     const int check_l_local = owns_checkpoint ? (check_l_global - mpi.l_start + 1) : -1;
     const int check_m_local = owns_checkpoint ? (check_m_global - mpi.m_start + 1) : -1;
 
-    if (mpi.rank == 0) {
+    if (mpi.rank == 0 && cfg.diagnostics.console_checkpoint) {
         std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n", "t", "dt", "rho",
                     "v_z", "v_phi", "e", "H_phi");
         std::printf("%-14s %-14s %-14s %-14s %-14s %-14s %-14s\n", "--------------",
@@ -237,6 +270,7 @@ auto main(int argc, char* argv[]) -> int {
                 std::printf("Step %d, t=%.6f, dt=%.6e, relative change: %.6e\n",
                             step_count, t, dt, change);
             }
+
             if (change < cfg.convergence_threshold) {
                 converged = true;
                 if (mpi.rank == 0) {
@@ -246,7 +280,10 @@ auto main(int argc, char* argv[]) -> int {
             fields.SavePrev();
         }
 
-        if (step_count % 100 == 0) {
+        // CFL sanity check — pure observability, MaxWaveSpeed performs an
+        // MPI_Allreduce.  Gated by diagnostics.cfl_check.  The flag goes
+        // before the modulo so the integer divide is skipped when off.
+        if (cfg.diagnostics.cfl_check && step_count % 100 == 0) {
             Diagnostics::CheckCfl(fields, cfg, mpi, mpi.local_L, mpi.local_M, dt,
                                   step_count);
         }
@@ -256,28 +293,36 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (step_count % 1000 == 0) {
-            // ---- Physics checkpoint (existing) ----
-            double local_vals[5] = {0, 0, 0, 0, 0};
-            if (owns_checkpoint) {
-                local_vals[0] = fields.rho[check_l_local][check_m_local];
-                local_vals[1] = fields.v_z[check_l_local][check_m_local];
-                local_vals[2] = fields.v_phi[check_l_local][check_m_local];
-                local_vals[3] = fields.e[check_l_local][check_m_local];
-                local_vals[4] = fields.H_phi[check_l_local][check_m_local];
-            }
-            double global_vals[5];
-            MPI_Reduce(local_vals, global_vals, 5, MPI_DOUBLE, MPI_SUM, 0,
-                       MPI_COMM_WORLD);
-            if (mpi.rank == 0) {
-                std::printf("%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
-                            t, dt, global_vals[0], global_vals[1], global_vals[2],
-                            global_vals[3], global_vals[4]);
+            // ---- Physics checkpoint row ----
+            // Gated by diagnostics.console_checkpoint.  The MPI_Reduce here
+            // is the main per-step synchronisation cost when this is on, so
+            // turning it off is the single biggest perf win available.
+            if (cfg.diagnostics.console_checkpoint) {
+                double local_vals[5] = {0, 0, 0, 0, 0};
+                if (owns_checkpoint) {
+                    local_vals[0] = fields.rho  [check_l_local][check_m_local];
+                    local_vals[1] = fields.v_z  [check_l_local][check_m_local];
+                    local_vals[2] = fields.v_phi[check_l_local][check_m_local];
+                    local_vals[3] = fields.e    [check_l_local][check_m_local];
+                    local_vals[4] = fields.H_phi[check_l_local][check_m_local];
+                }
+                double global_vals[5];
+                MPI_Reduce(local_vals, global_vals, 5, MPI_DOUBLE, MPI_SUM, 0,
+                           MPI_COMM_WORLD);
+                if (mpi.rank == 0) {
+                    std::printf("%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
+                                t, dt, global_vals[0], global_vals[1], global_vals[2],
+                                global_vals[3], global_vals[4]);
+                }
             }
 
             // ---- Verification: append a row to the integral table ----
-            const auto integrals_now =
-                Verification::ComputeIntegrals(fields, grid, cfg, mpi);
-            Verification::PrintIntegrals(integrals_now, step_count, t, mpi.rank);
+            // Gated by diagnostics.conserved_integrals.
+            if (cfg.diagnostics.conserved_integrals) {
+                const auto integrals_now =
+                    Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+                Verification::PrintIntegrals(integrals_now, step_count, t, mpi.rank);
+            }
         }
     }
 
@@ -293,8 +338,18 @@ auto main(int argc, char* argv[]) -> int {
                     step_count);
     }
 
-    const auto integrals_final = Verification::ComputeIntegrals(fields, grid, cfg, mpi);
-    Verification::ReportDrift(integrals_ref, integrals_final, step_count, t, mpi.rank);
+    // ----------------------------------------------------------------
+    // Final conserved-integral drift report.  Compares the step-0 snapshot
+    // (captured above) against the end-of-run integrals.  Gated by
+    // diagnostics.conserved_integrals so the reference snapshot above and
+    // this final comparison toggle together as one logical feature.
+    // ----------------------------------------------------------------
+    if (cfg.diagnostics.conserved_integrals) {
+        const auto integrals_final =
+            Verification::ComputeIntegrals(fields, grid, cfg, mpi);
+        Verification::ReportDrift(integrals_ref, integrals_final, step_count, t,
+                                  mpi.rank);
+    }
 
     // ----------------------------------------------------------------
     // Outlet-plane diagnostics: mass flux and thrust.
@@ -302,15 +357,19 @@ auto main(int argc, char* argv[]) -> int {
     // Both are MPI-collective; only ranks owning the outlet column
     // (coords[0] == dims[0]-1) contribute, but every rank must call
     // them because an MPI_Allreduce is performed internally.
+    //
+    // Gated by diagnostics.outlet_diagnostics.
     // ----------------------------------------------------------------
-    const double mass_flux = Diagnostics::GetMassFlux(fields, grid, cfg, mpi);
-    const double thrust = Diagnostics::GetThrust(fields, grid, cfg, mpi);
+    if (cfg.diagnostics.outlet_diagnostics) {
+        const double mass_flux = Diagnostics::GetMassFlux(fields, grid, cfg, mpi);
+        const double thrust    = Diagnostics::GetThrust  (fields, grid, cfg, mpi);
 
-    if (mpi.rank == 0) {
-        std::printf("\n--- Outlet-plane diagnostics ---\n");
-        std::printf("Mass flux : %.6e\n", mass_flux);
-        std::printf("Thrust    : %.6e\n", thrust);
-        std::printf("--------------------------------\n");
+        if (mpi.rank == 0) {
+            std::printf("\n--- Outlet-plane diagnostics ---\n");
+            std::printf("Mass flux : %.6e\n", mass_flux);
+            std::printf("Thrust    : %.6e\n", thrust);
+            std::printf("--------------------------------\n");
+        }
     }
 
     return 0;
