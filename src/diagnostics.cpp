@@ -16,10 +16,7 @@ auto MaxWaveSpeed(const Fields& f, const SimConfig& cfg,
                       const MPIManager& mpi) -> double {
     double local_max = 0.0;
 
-    // Iterate over interior cells only: [1..local_L][1..local_M].
-    // Ghost cells are excluded because they may hold stale or boundary
-    // values that would produce an artificially large wave speed.
-    #pragma omp parallel for collapse(2) reduction(max : local_max)
+    #pragma omp parallel for reduction(max : local_max)
     for (int l = 1; l <= local_L; ++l) {
         for (int m = 1; m <= local_M; ++m) {
             const double cs = std::sqrt(cfg.gamma * f.p[l][m] / f.rho[l][m]);
@@ -72,8 +69,7 @@ auto SolutionChange(const Fields& f, int local_L, int local_M) -> double {
     double sum_diff = 0.0;
     double sum_curr = 0.0;
 
-    // Interior cells only.
-    #pragma omp parallel for collapse(2) reduction(+ : sum_diff, sum_curr)
+    #pragma omp parallel for reduction(+ : sum_diff, sum_curr)
     for (int l = 1; l <= local_L; ++l) {
         for (int m = 1; m <= local_M; ++m) {
             auto sq = [](double x) -> double { return x * x; };

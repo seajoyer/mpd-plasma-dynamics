@@ -28,8 +28,10 @@ public:
     int local_M_with_ghosts;
     int m_start;   ///< global m index of the first owned interior cell
 
-    Array2D r;     ///< physical radial coordinate,  r[l_local][m_local]
-    Array2D r_z;   ///< dr/dz at each node,           r_z[l_local][m_local]
+
+    Array2D r;      ///< physical radial coordinate,   r[l_local][m_local]
+    Array2D r_z;    ///< dr/dz at each node,           r_z[l_local][m_local]
+    Array2D inv_r;
 
     std::vector<double> R;   ///< R[l]  = r_outer(z) - r_inner(z),  radial span
     std::vector<double> dr;  ///< dr[l] = R[l] / M_max,             radial cell size

@@ -110,6 +110,7 @@ void Solver::ComputeCentralUpdate() {
     const int m_lo = mpi_.IsMLoBoundary() ? 2 : 1;
     const int m_hi = mpi_.IsMHiBoundary() ? local_M - 1 : local_M;
 
+    // Raw double** pointers — one dereference per row access inside the loop.
     auto** u0_1 = f_.u0_1.Raw();  auto** u0_2 = f_.u0_2.Raw();
     auto** u0_3 = f_.u0_3.Raw();  auto** u0_4 = f_.u0_4.Raw();
     auto** u0_5 = f_.u0_5.Raw();  auto** u0_6 = f_.u0_6.Raw();
@@ -129,68 +130,100 @@ void Solver::ComputeCentralUpdate() {
     const double* dr = grid_.dr.data();
     const double dt_inv_2dz = dt / (2.0 * dz);
 
-    #pragma omp parallel for collapse(2)
+    // Parallelise on l only (not collapse(2)) — see performance notes above.
+    #pragma omp parallel for
     for (int l = 1; l <= local_L; ++l) {
+        const double dt_inv_2drl = dt / (2.0 * dr[l]);
+
+        // ---- Hoist row pointers for all three l-rows used in the stencil ----
+        // Conservative state (three rows each: l-1, l, l+1)
+        const double* u0_1_lm = u0_1[l-1]; const double* u0_1_l = u0_1[l]; const double* u0_1_lp = u0_1[l+1];
+        const double* u0_2_lm = u0_2[l-1]; const double* u0_2_l = u0_2[l]; const double* u0_2_lp = u0_2[l+1];
+        const double* u0_3_lm = u0_3[l-1]; const double* u0_3_l = u0_3[l]; const double* u0_3_lp = u0_3[l+1];
+        const double* u0_4_lm = u0_4[l-1]; const double* u0_4_l = u0_4[l]; const double* u0_4_lp = u0_4[l+1];
+        const double* u0_5_lm = u0_5[l-1]; const double* u0_5_l = u0_5[l]; const double* u0_5_lp = u0_5[l+1];
+        const double* u0_6_lm = u0_6[l-1]; const double* u0_6_l = u0_6[l]; const double* u0_6_lp = u0_6[l+1];
+        const double* u0_7_lm = u0_7[l-1]; const double* u0_7_l = u0_7[l]; const double* u0_7_lp = u0_7[l+1];
+        const double* u0_8_lm = u0_8[l-1]; const double* u0_8_l = u0_8[l]; const double* u0_8_lp = u0_8[l+1];
+
+        // Output rows
+        double* u_1_l  = u_1[l];  double* u_2_l  = u_2[l];
+        double* u_3_l  = u_3[l];  double* u_4_l  = u_4[l];
+        double* u_5_l  = u_5[l];  double* u_6_l  = u_6[l];
+        double* u_7_l  = u_7[l];  double* u_8_l  = u_8[l];
+
+        // Physical fields (three rows where needed)
+        const double* vz_lm  = v_z[l-1];   const double* vz_l  = v_z[l];   const double* vz_lp  = v_z[l+1];
+        const double* vr_lm  = v_r[l-1];                                   const double* vr_lp  = v_r[l+1];
+        const double* vphi_lm= v_phi[l-1];                                 const double* vphi_lp= v_phi[l+1];
+        const double* Hz_lm  = H_z[l-1];   const double* Hz_l  = H_z[l];   const double* Hz_lp  = H_z[l+1];
+        const double* Hr_lm  = H_r[l-1];                                   const double* Hr_lp  = H_r[l+1];
+        const double* Hphi_lm= H_phi[l-1]; const double* Hphi_l= H_phi[l]; const double* Hphi_lp= H_phi[l+1];
+        const double* P_lm   = P[l-1];                                     const double* P_lp   = P[l+1];
+        const double* p_l    = p[l];                                       
+        const double* r_lm   = r[l-1];     const double* r_l   = r[l];     const double* r_lp   = r[l+1];
+        const double* rho_l  = rho[l];
+        const double* vphi_l = v_phi[l];
+        const double* Hphi_l2= H_phi[l]; // alias for same row, separate name for clarity
+
         for (int m = m_lo; m <= m_hi; ++m) {
-            const double dt_inv_2drl = dt / (2.0 * dr[l]);
+            u_1_l[m] =
+                0.25 * (u0_1_lp[m] + u0_1_lm[m] + u0_1_l[m+1] + u0_1_l[m-1])
+                - dt_inv_2dz  * (u0_1_lp[m]*vz_lp[m]   - u0_1_lm[m]*vz_lm[m])
+                - dt_inv_2drl * (u0_1_l[m+1]*vr_lp[m+1] - u0_1_l[m-1]*vr_lp[m-1]);
 
-            u_1[l][m] =
-                0.25 * (u0_1[l+1][m] + u0_1[l-1][m] + u0_1[l][m+1] + u0_1[l][m-1])
-                - dt_inv_2dz  * (u0_1[l+1][m]*v_z[l+1][m] - u0_1[l-1][m]*v_z[l-1][m])
-                - dt_inv_2drl * (u0_1[l][m+1]*v_r[l][m+1] - u0_1[l][m-1]*v_r[l][m-1]);
+            u_2_l[m] =
+                0.25 * (u0_2_lp[m] + u0_2_lm[m] + u0_2_l[m+1] + u0_2_l[m-1])
+                + dt_inv_2dz  * ( (Hz_lp[m]*Hz_lp[m] - P_lp[m])*r_lp[m]
+                                 -(Hz_lm[m]*Hz_lm[m] - P_lm[m])*r_lm[m])
+                + dt_inv_2drl * ( Hz_l[m+1]*Hr_lp[m+1]*r_l[m+1]
+                                 -Hz_l[m-1]*Hr_lp[m-1]*r_l[m-1])
+                - dt_inv_2dz  * (u0_2_lp[m]*vz_lp[m]   - u0_2_lm[m]*vz_lm[m])
+                - dt_inv_2drl * (u0_2_l[m+1]*vr_lp[m+1] - u0_2_l[m-1]*vr_lp[m-1]);
 
-            u_2[l][m] =
-                0.25 * (u0_2[l+1][m] + u0_2[l-1][m] + u0_2[l][m+1] + u0_2[l][m-1])
-                + dt_inv_2dz  * ( (H_z[l+1][m]*H_z[l+1][m] - P[l+1][m])*r[l+1][m]
-                                 -(H_z[l-1][m]*H_z[l-1][m] - P[l-1][m])*r[l-1][m])
-                + dt_inv_2drl * ( H_z[l][m+1]*H_r[l][m+1]*r[l][m+1]
-                                 -H_z[l][m-1]*H_r[l][m-1]*r[l][m-1])
-                - dt_inv_2dz  * (u0_2[l+1][m]*v_z[l+1][m] - u0_2[l-1][m]*v_z[l-1][m])
-                - dt_inv_2drl * (u0_2[l][m+1]*v_r[l][m+1] - u0_2[l][m-1]*v_r[l][m-1]);
+            u_3_l[m] =
+                0.25 * (u0_3_lp[m] + u0_3_lm[m] + u0_3_l[m+1] + u0_3_l[m-1])
+                + dt * (rho_l[m]*vphi_l[m]*vphi_l[m] + P_lp[m] - Hphi_l2[m]*Hphi_l2[m])
+                + dt_inv_2dz  * ( Hz_lp[m]*Hr_lp[m]*r_lp[m]
+                                 -Hz_lm[m]*Hr_lm[m]*r_lm[m])
+                + dt_inv_2drl * ( (Hr_lp[m+1]*Hr_lp[m+1] - P_lp[m+1])*r_l[m+1]
+                                 -(Hr_lp[m-1]*Hr_lp[m-1] - P_lp[m-1])*r_l[m-1])
+                - dt_inv_2dz  * (u0_3_lp[m]*vz_lp[m]   - u0_3_lm[m]*vz_lm[m])
+                - dt_inv_2drl * (u0_3_l[m+1]*vr_lp[m+1] - u0_3_l[m-1]*vr_lp[m-1]);
 
-            u_3[l][m] =
-                0.25 * (u0_3[l+1][m] + u0_3[l-1][m] + u0_3[l][m+1] + u0_3[l][m-1])
-                + dt * (rho[l][m]*v_phi[l][m]*v_phi[l][m] + P[l][m] - H_phi[l][m]*H_phi[l][m])
-                + dt_inv_2dz  * ( H_z[l+1][m]*H_r[l+1][m]*r[l+1][m]
-                                 -H_z[l-1][m]*H_r[l-1][m]*r[l-1][m])
-                + dt_inv_2drl * ( (H_r[l][m+1]*H_r[l][m+1] - P[l][m+1])*r[l][m+1]
-                                 -(H_r[l][m-1]*H_r[l][m-1] - P[l][m-1])*r[l][m-1])
-                - dt_inv_2dz  * (u0_3[l+1][m]*v_z[l+1][m] - u0_3[l-1][m]*v_z[l-1][m])
-                - dt_inv_2drl * (u0_3[l][m+1]*v_r[l][m+1] - u0_3[l][m-1]*v_r[l][m-1]);
+            u_4_l[m] =
+                0.25 * (u0_4_lp[m] + u0_4_lm[m] + u0_4_l[m+1] + u0_4_l[m-1])
+                + dt * (-rho_l[m]*v_r[l][m]*vphi_l[m] + Hphi_l2[m]*Hr_lp[m])
+                + dt_inv_2dz  * ( Hphi_lp[m]*Hz_lp[m]*r_lp[m]
+                                 -Hphi_lm[m]*Hz_lm[m]*r_lm[m])
+                + dt_inv_2drl * ( Hphi_l[m+1]*Hr_lp[m+1]*r_l[m+1]
+                                 -Hphi_l[m-1]*Hr_lp[m-1]*r_l[m-1])
+                - dt_inv_2dz  * (u0_4_lp[m]*vz_lp[m]   - u0_4_lm[m]*vz_lm[m])
+                - dt_inv_2drl * (u0_4_l[m+1]*vr_lp[m+1] - u0_4_l[m-1]*vr_lp[m-1]);
 
-            u_4[l][m] =
-                0.25 * (u0_4[l+1][m] + u0_4[l-1][m] + u0_4[l][m+1] + u0_4[l][m-1])
-                + dt * (-rho[l][m]*v_r[l][m]*v_phi[l][m] + H_phi[l][m]*H_r[l][m])
-                + dt_inv_2dz  * ( H_phi[l+1][m]*H_z[l+1][m]*r[l+1][m]
-                                 -H_phi[l-1][m]*H_z[l-1][m]*r[l-1][m])
-                + dt_inv_2drl * ( H_phi[l][m+1]*H_r[l][m+1]*r[l][m+1]
-                                 -H_phi[l][m-1]*H_r[l][m-1]*r[l][m-1])
-                - dt_inv_2dz  * (u0_4[l+1][m]*v_z[l+1][m] - u0_4[l-1][m]*v_z[l-1][m])
-                - dt_inv_2drl * (u0_4[l][m+1]*v_r[l][m+1] - u0_4[l][m-1]*v_r[l][m-1]);
+            u_5_l[m] =
+                0.25 * (u0_5_lp[m] + u0_5_lm[m] + u0_5_l[m+1] + u0_5_l[m-1])
+                - p_l[m] * (dt_inv_2dz  * (vz_lp[m]*r_lp[m]   - vz_lm[m]*r_lm[m])
+                           + dt_inv_2drl * (v_r[l][m+1]*r_l[m+1] - v_r[l][m-1]*r_l[m-1]))
+                - dt_inv_2dz  * (u0_5_lp[m]*vz_lp[m]   - u0_5_lm[m]*vz_lm[m])
+                - dt_inv_2drl * (u0_5_l[m+1]*vr_lp[m+1] - u0_5_l[m-1]*vr_lp[m-1]);
 
-            u_5[l][m] =
-                0.25 * (u0_5[l+1][m] + u0_5[l-1][m] + u0_5[l][m+1] + u0_5[l][m-1])
-                - p[l][m] * (dt_inv_2dz  * (v_z[l+1][m]*r[l+1][m] - v_z[l-1][m]*r[l-1][m])
-                            + dt_inv_2drl * (v_r[l][m+1]*r[l][m+1] - v_r[l][m-1]*r[l][m-1]))
-                - dt_inv_2dz  * (u0_5[l+1][m]*v_z[l+1][m] - u0_5[l-1][m]*v_z[l-1][m])
-                - dt_inv_2drl * (u0_5[l][m+1]*v_r[l][m+1] - u0_5[l][m-1]*v_r[l][m-1]);
+            u_6_l[m] =
+                0.25 * (u0_6_lp[m] + u0_6_lm[m] + u0_6_l[m+1] + u0_6_l[m-1])
+                + dt_inv_2dz  * (Hz_lp[m]*vphi_lp[m]   - Hz_lm[m]*vphi_lm[m])
+                + dt_inv_2drl * (Hr_lp[m+1]*vphi_l[m+1] - Hr_lp[m-1]*vphi_l[m-1])
+                - dt_inv_2dz  * (u0_6_lp[m]*vz_lp[m]   - u0_6_lm[m]*vz_lm[m])
+                - dt_inv_2drl * (u0_6_l[m+1]*vr_lp[m+1] - u0_6_l[m-1]*vr_lp[m-1]);
 
-            u_6[l][m] =
-                0.25 * (u0_6[l+1][m] + u0_6[l-1][m] + u0_6[l][m+1] + u0_6[l][m-1])
-                + dt_inv_2dz  * (H_z[l+1][m]*v_phi[l+1][m] - H_z[l-1][m]*v_phi[l-1][m])
-                + dt_inv_2drl * (H_r[l][m+1]*v_phi[l][m+1] - H_r[l][m-1]*v_phi[l][m-1])
-                - dt_inv_2dz  * (u0_6[l+1][m]*v_z[l+1][m] - u0_6[l-1][m]*v_z[l-1][m])
-                - dt_inv_2drl * (u0_6[l][m+1]*v_r[l][m+1] - u0_6[l][m-1]*v_r[l][m-1]);
+            u_7_l[m] =
+                0.25 * (u0_7_lp[m] + u0_7_lm[m] + u0_7_l[m+1] + u0_7_l[m-1])
+                + dt_inv_2drl * (Hr_lp[m+1]*vz_l[m+1]*r_l[m+1] - Hr_lp[m-1]*vz_l[m-1]*r_l[m-1])
+                - dt_inv_2drl * (u0_7_l[m+1]*vr_lp[m+1] - u0_7_l[m-1]*vr_lp[m-1]);
 
-            u_7[l][m] =
-                0.25 * (u0_7[l+1][m] + u0_7[l-1][m] + u0_7[l][m+1] + u0_7[l][m-1])
-                + dt_inv_2drl * (H_r[l][m+1]*v_z[l][m+1]*r[l][m+1] - H_r[l][m-1]*v_z[l][m-1]*r[l][m-1])
-                - dt_inv_2drl * (u0_7[l][m+1]*v_r[l][m+1] - u0_7[l][m-1]*v_r[l][m-1]);
-
-            u_8[l][m] =
-                0.25 * (u0_8[l+1][m] + u0_8[l-1][m] + u0_8[l][m+1] + u0_8[l][m-1])
-                + dt_inv_2dz * (H_z[l+1][m]*v_r[l+1][m]*r[l+1][m] - H_z[l-1][m]*v_r[l-1][m]*r[l-1][m])
-                - dt_inv_2dz * (u0_8[l+1][m]*v_z[l+1][m] - u0_8[l-1][m]*v_z[l-1][m]);
+            u_8_l[m] =
+                0.25 * (u0_8_lp[m] + u0_8_lm[m] + u0_8_l[m+1] + u0_8_l[m-1])
+                + dt_inv_2dz * (Hz_lp[m]*v_r[l+1][m]*r_lp[m] - Hz_lm[m]*v_r[l-1][m]*r_lm[m])
+                - dt_inv_2dz * (u0_8_lp[m]*vz_lp[m] - u0_8_lm[m]*vz_lm[m]);
         }
     }
 }

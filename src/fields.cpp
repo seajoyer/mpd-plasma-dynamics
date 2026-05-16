@@ -1,6 +1,7 @@
 #include "fields.hpp"
 
 #include <cmath>
+#include <cstring>
 
 #include "iinitial_condition.hpp"
 
@@ -31,15 +32,11 @@ Fields::Fields(int r, int c, bool with_prev)
 
 void Fields::InitPhysical(const IInitialCondition& ic, const SimConfig& cfg,
                           const Grid& grid, int l_start) {
-    // All IC logic lives in the implementation; Fields is just the owner of
-    // the arrays.  Ghost cells remain at zero and are filled by the first
-    // ghost exchange before any stencil computation.
     ic.Apply(*this, grid, cfg, l_start);
 }
 
 void Fields::InitConservative(const Grid& grid) {
-    // Interior cells only: ghost cells have undefined physical values at init.
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for
     for (int l = 1; l < rows - 1; ++l) {
         for (int m = 1; m < cols - 1; ++m) {
             u0_1[l][m] = rho [l][m] * grid.r[l][m];
@@ -55,22 +52,17 @@ void Fields::InitConservative(const Grid& grid) {
 }
 
 // ---- per-step helpers --------------------------------------------------
-
 void Fields::SavePrev() {
     if (!has_prev) return;
 
-    #pragma omp parallel for collapse(2)
-    for (int l = 0; l < rows; ++l) {
-        for (int m = 0; m < cols; ++m) {
-            rho_prev [l][m] = rho  [l][m];
-            v_z_prev [l][m] = v_z  [l][m];
-            v_r_prev [l][m] = v_r  [l][m];
-            v_phi_prev[l][m]= v_phi[l][m];
-            H_z_prev [l][m] = H_z  [l][m];
-            H_r_prev [l][m] = H_r  [l][m];
-            H_phi_prev[l][m]= H_phi[l][m];
-        }
-    }
+    const std::size_t nbytes = rho.Size() * sizeof(double);
+    std::memcpy(rho_prev .Flat(), rho  .Flat(), nbytes);
+    std::memcpy(v_z_prev .Flat(), v_z  .Flat(), nbytes);
+    std::memcpy(v_r_prev .Flat(), v_r  .Flat(), nbytes);
+    std::memcpy(v_phi_prev.Flat(),v_phi .Flat(), nbytes);
+    std::memcpy(H_z_prev .Flat(), H_z  .Flat(), nbytes);
+    std::memcpy(H_r_prev .Flat(), H_r  .Flat(), nbytes);
+    std::memcpy(H_phi_prev.Flat(),H_phi .Flat(), nbytes);
 }
 
 void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
@@ -78,10 +70,10 @@ void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
                                       int m_lo, int m_hi) {
     const double gamma = cfg.gamma;
 
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for
     for (int l = l_lo; l <= l_hi; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
-            const double inv_r  = 1.0 / grid.r[l][m];
+            const double inv_r  = grid.inv_r[l][m];
             const double inv_u1 = 1.0 / u_1[l][m];
 
             rho  [l][m] = u_1[l][m] * inv_r;
@@ -107,10 +99,10 @@ void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
                                   int m_lo, int m_hi) {
     const double gamma = cfg.gamma;
 
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for
     for (int l = l_lo; l <= l_hi; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
-            const double inv_r  = 1.0 / grid.r[l][m];
+            const double inv_r  = grid.inv_r[l][m];
             const double inv_u1 = 1.0 / u0_1[l][m];
 
             rho  [l][m] = u0_1[l][m] * inv_r;
@@ -132,7 +124,7 @@ void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
 }
 
 void Fields::CopyUToU0() {
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for
     for (int l = 0; l < rows; ++l) {
         for (int m = 0; m < cols; ++m) {
             u0_1[l][m] = u_1[l][m];

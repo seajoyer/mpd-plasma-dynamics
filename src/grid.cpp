@@ -8,8 +8,9 @@ Grid::Grid(const SimConfig& cfg_, int lwg, int ls, int lmwg, int ms,
       l_start(ls),
       local_M_with_ghosts(lmwg),
       m_start(ms),
-      r  (lwg, lmwg),
-      r_z(lwg, lmwg),
+      r    (lwg, lmwg),
+      r_z  (lwg, lmwg),
+      inv_r(lwg, lmwg),   // same ghost-inclusive dimensions as r
       R  (lwg, 0.0),
       dr (lwg, 0.0)
 {
@@ -37,6 +38,8 @@ void Grid::Build() {
             r  [l][m] = (1.0 - frac) * geom.RInner(z) + frac * geom.ROuter(z);
             r_z[l][m] = (1.0 - frac) * geom.DrInnerDz(z)
                       + frac         * geom.DrOuterDz(z);
+
+            inv_r[l][m] = (r[l][m] > 0.0) ? 1.0 / r[l][m] : 0.0;
         }
     }
 }
