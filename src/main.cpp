@@ -259,7 +259,8 @@ auto main(int argc, char* argv[]) -> int {
         t += dt;
         ++step_count;
 
-        if (cfg.adaptive_dt) {
+        constexpr int kDtRecomputeStride = 10;
+        if (cfg.adaptive_dt && step_count % kDtRecomputeStride == 0) {
             dt = Diagnostics::ComputeDt(fields, cfg, mpi.local_L, mpi.local_M, mpi, dt);
         }
 

@@ -74,6 +74,13 @@ public:
     void UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
                                  int l_lo, int l_hi, int m_lo, int m_hi);
 
+    /// Same as UpdatePhysicalFromU but reads from u0_* (the conservative
+    /// state at the *beginning* of the current step).  Used to reconstruct
+    /// physical fields in the ghost layer after the per-step exchange of
+    /// conservative arrays, without paying to ship physical fields too.
+    void UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
+                              int l_lo, int l_hi, int m_lo, int m_hi);
+
     /// Copy u_* → u0_* for all cells (including ghosts).
     void CopyUToU0();
 };

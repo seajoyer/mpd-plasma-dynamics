@@ -39,12 +39,12 @@ grid:
 # printed for monitoring.  For maximum performance set every flag to false.
 #
 diagnostics:
-  cfl_check:            true   # CheckCfl every 100 steps (MaxWaveSpeed Allreduce)
-  conserved_integrals:  true   # Conserved-integral table every 1000 steps + final drift report
-  console_checkpoint:   true   # Per-1000-step (t, dt, rho, v_z, ...) row
-  outlet_diagnostics:   true   # Final mass-flux and thrust at the outlet plane
-  startup_verification: true   # Ghost-exchange round-trip and radial-symmetry checks at startup
-  write_mpi_rank:       true   # Include MPI_Rank scalar array in VTK frames for decomposition visualisation
+  cfl_check:            false   # CheckCfl every 100 steps (MaxWaveSpeed Allreduce)
+  conserved_integrals:  false   # Conserved-integral table every 1000 steps + final drift report
+  console_checkpoint:   true    # Per-1000-step (t, dt, rho, v_z, ...) row
+  outlet_diagnostics:   false   # Final mass-flux and thrust at the outlet plane
+  startup_verification: false   # Ghost-exchange round-trip and radial-symmetry checks at startup
+  write_mpi_rank:       false   # Include MPI_Rank scalar array in VTK frames for decomposition visualisation
 
 # ── Geometry ─────────────────────────────────────────────────────────────────
 #

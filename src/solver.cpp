@@ -31,8 +31,25 @@ void Solver::Advance(double dt) {
     bc_m_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_l_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
 
-    // Full physical reconstruction: covers all cells (central + BC cells).
-    f_.UpdatePhysicalFromU(grid_, cfg_, 1, mpi_.local_L, 1, mpi_.local_M);
+    // Reconstruct only the boundary strips that the FaceBCs just wrote u for.
+    // The interior was already done by UpdateCentralPhysical.  On
+    // non-M-boundary ranks the m_lo/m_hi strips are no-ops because
+    // UpdateCentralPhysical already covered m=1 and m=local_M there.
+    const int local_L = mpi_.local_L;
+    const int local_M = mpi_.local_M;
+
+    if (mpi_.IsLLoBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 1, 1, 1, local_M);
+    }
+    if (mpi_.IsLHiBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, local_L, local_L, 1, local_M);
+    }
+    if (mpi_.IsMLoBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, 1, 1);
+    }
+    if (mpi_.IsMHiBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
+    }
     f_.CopyUToU0();
 }
 
@@ -41,15 +58,31 @@ void Solver::Advance(double dt) {
 // ============================================================
 
 void Solver::ExchangeAllGhosts() {
-    double** arrs[18] = {
+    // Only conservative arrays are shipped.  Physical fields are derived
+    // locally from the just-received u0_* on the four ghost rings below.
+    double** arrs[8] = {
         f_.u0_1.Raw(), f_.u0_2.Raw(), f_.u0_3.Raw(), f_.u0_4.Raw(),
-        f_.u0_5.Raw(), f_.u0_6.Raw(), f_.u0_7.Raw(), f_.u0_8.Raw(),
-        f_.rho.Raw(),   f_.v_z.Raw(),   f_.v_r.Raw(),
-        f_.v_phi.Raw(), f_.e.Raw(),     f_.p.Raw(),
-        f_.P.Raw(),     f_.H_z.Raw(),   f_.H_r.Raw(),
-        f_.H_phi.Raw()
+        f_.u0_5.Raw(), f_.u0_6.Raw(), f_.u0_7.Raw(), f_.u0_8.Raw()
     };
-    mpi_.ExchangeGhostsBatch(arrs, 18, col_batch_buf_);
+    mpi_.ExchangeGhostsBatch(arrs, 8, col_batch_buf_);
+
+    // Reconstruct physical fields in the four ghost rings.  Skip rings on
+    // physical-domain boundaries (no neighbour, no fresh data to derive from).
+    const int local_L = mpi_.local_L;
+    const int local_M = mpi_.local_M;
+
+    if (mpi_.nbr_l_lo != MPI_PROC_NULL) {
+        f_.UpdatePhysicalFromU0(grid_, cfg_, 0, 0, 1, local_M);
+    }
+    if (mpi_.nbr_l_hi != MPI_PROC_NULL) {
+        f_.UpdatePhysicalFromU0(grid_, cfg_, local_L + 1, local_L + 1, 1, local_M);
+    }
+    if (mpi_.nbr_m_lo != MPI_PROC_NULL) {
+        f_.UpdatePhysicalFromU0(grid_, cfg_, 1, local_L, 0, 0);
+    }
+    if (mpi_.nbr_m_hi != MPI_PROC_NULL) {
+        f_.UpdatePhysicalFromU0(grid_, cfg_, 1, local_L, local_M + 1, local_M + 1);
+    }
 }
 
 // ============================================================
