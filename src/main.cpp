@@ -23,8 +23,6 @@
 auto main(int argc, char* argv[]) -> int {
     // ----------------------------------------------------------------
     // 1. Register all built-in geometry types.
-    //    Must happen before SimConfig::Load() tries to validate names
-    //    or Grid is constructed.
     // ----------------------------------------------------------------
     RegisterAllGeometries();
 
@@ -90,14 +88,6 @@ auto main(int argc, char* argv[]) -> int {
 
     // ----------------------------------------------------------------
     // Verification check 1: ghost exchange round-trip.
-    //
-    // Run immediately after MPI initialisation — before any field
-    // allocation — so that an MPI packing or neighbour bug is caught
-    // before it silently corrupts physics results.  A FAIL here must
-    // be resolved before proceeding.
-    //
-    // Gated by diagnostics.startup_verification: disable only after the
-    // ghost-exchange code is known good for the chosen rank topology.
     // ----------------------------------------------------------------
     if (cfg.diagnostics.startup_verification) {
         if (mpi.rank == 0) {
@@ -105,13 +95,12 @@ auto main(int argc, char* argv[]) -> int {
         }
         const bool ghost_ok = Verification::CheckGhostExchange(mpi, cfg);
         if (!ghost_ok) {
-            // Ghost exchange errors make all subsequent results meaningless.
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
     }
 
     // ----------------------------------------------------------------
-    // 3. Build geometry (owned in main; outlives Grid)
+    // 3. Build geometry
     // ----------------------------------------------------------------
     YAML::Node geom_params;
     if (!cfg.geometry.params_yaml.empty()) {
@@ -122,18 +111,6 @@ auto main(int argc, char* argv[]) -> int {
 
     // ----------------------------------------------------------------
     // 4. Build initial condition
-    //
-    // Two modes, selected by the presence of initial_conditions.vtk_file:
-    //
-    //   VTK restart  — VtkIC reads a structured-grid VTK file written by
-    //                  IOManager::WriteFrame and bilinearly interpolates all
-    //                  eight physical fields onto the current grid.  Supports
-    //                  same-resolution restarts (exact lookup) and remapping
-    //                  to a different L_max / M_max (bilinear interpolation).
-    //
-    //   Expression IC (default) — ExpressionIC evaluates per-field math
-    //                  expressions cell-by-cell.  An empty params block falls
-    //                  back to built-in defaults (rho=1, v_z=0, …).
     // ----------------------------------------------------------------
     std::unique_ptr<IInitialCondition> ic;
 
@@ -142,8 +119,6 @@ auto main(int argc, char* argv[]) -> int {
             std::printf("IC                  : VTK restart  '%s'\n",
                         cfg.initial_conditions.vtk_file.c_str());
         }
-        // Every rank constructs VtkIC independently; the file must be on a
-        // shared filesystem accessible from all compute nodes.
         ic = std::make_unique<VtkIC>(cfg.initial_conditions.vtk_file);
     } else {
         YAML::Node ic_params;
@@ -172,32 +147,10 @@ auto main(int argc, char* argv[]) -> int {
         fields.SavePrev();
     }
 
-    // ----------------------------------------------------------------
-    // Verification check 2: radial symmetry at t = 0.
-    //
-    // Reports the maximum normalised radial density gradient across all
-    // interior cells.  For the default thruster IC the value will be
-    // non-zero (radial variation is physical); record this as a baseline
-    // to compare against if unexpected symmetry-breaking is suspected.
-    // For a 1-D test case (radially-uniform IC) the value should be ~0.
-    //
-    // Gated by diagnostics.startup_verification.
-    // ----------------------------------------------------------------
     if (cfg.diagnostics.startup_verification) {
         Verification::CheckRadialSymmetry(fields, mpi);
     }
 
-    // ----------------------------------------------------------------
-    // Verification check 3: conserved-integral tracking.
-    //
-    // Capture the reference integrals at step 0 so that every subsequent
-    // snapshot can report the cumulative drift.  For open BCs a steady
-    // monotonic drift is expected; a sudden large jump flags a bug.
-    //
-    // Gated by diagnostics.conserved_integrals — this is the reference
-    // snapshot needed by ReportDrift() at the end of the run, so it
-    // must be paired with the in-loop and final calls below.
-    // ----------------------------------------------------------------
     Verification::ConservedIntegrals integrals_ref{};
 
     if (cfg.diagnostics.conserved_integrals) {
@@ -212,8 +165,6 @@ auto main(int argc, char* argv[]) -> int {
 
     // ----------------------------------------------------------------
     // 6. Construct solver and I/O manager
-    //    Solver::Solver() calls FaceBC::FromConfig() which creates
-    //    PerFieldBC objects directly from BCSegmentConfig.
     // ----------------------------------------------------------------
     Solver solver(cfg, mpi, grid, fields);
     IOManager io(cfg, mpi);
@@ -225,6 +176,10 @@ auto main(int argc, char* argv[]) -> int {
     int step_count = 0;
     bool converged = false;
     double dt = cfg.dt;
+
+    // Cached max wave speed for the steady-flow ComputeDt optimisation.
+    // Initialised to -1 so the first call always runs a full Allreduce.
+    double prev_max_speed = -1.0;
 
     constexpr int check_l_global = 20;
     constexpr int check_m_global = 40;
@@ -261,7 +216,8 @@ auto main(int argc, char* argv[]) -> int {
 
         constexpr int kDtRecomputeStride = 10;
         if (cfg.adaptive_dt && step_count % kDtRecomputeStride == 0) {
-            dt = Diagnostics::ComputeDt(fields, cfg, mpi.local_L, mpi.local_M, mpi, dt);
+            dt = Diagnostics::ComputeDt(fields, cfg, mpi.local_L, mpi.local_M,
+                                        mpi, dt, prev_max_speed);
         }
 
         if (cfg.convergence_threshold > 0.0 && step_count % cfg.check_frequency == 0) {
@@ -281,9 +237,6 @@ auto main(int argc, char* argv[]) -> int {
             fields.SavePrev();
         }
 
-        // CFL sanity check — pure observability, MaxWaveSpeed performs an
-        // MPI_Allreduce.  Gated by diagnostics.cfl_check.  The flag goes
-        // before the modulo so the integer divide is skipped when off.
         if (cfg.diagnostics.cfl_check && step_count % 100 == 0) {
             Diagnostics::CheckCfl(fields, cfg, mpi, mpi.local_L, mpi.local_M, dt,
                                   step_count);
@@ -294,10 +247,6 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (step_count % 1000 == 0) {
-            // ---- Physics checkpoint row ----
-            // Gated by diagnostics.console_checkpoint.  The MPI_Reduce here
-            // is the main per-step synchronisation cost when this is on, so
-            // turning it off is the single biggest perf win available.
             if (cfg.diagnostics.console_checkpoint) {
                 double local_vals[5] = {0, 0, 0, 0, 0};
                 if (owns_checkpoint) {
@@ -317,8 +266,6 @@ auto main(int argc, char* argv[]) -> int {
                 }
             }
 
-            // ---- Verification: append a row to the integral table ----
-            // Gated by diagnostics.conserved_integrals.
             if (cfg.diagnostics.conserved_integrals) {
                 const auto integrals_now =
                     Verification::ComputeIntegrals(fields, grid, cfg, mpi);
@@ -339,12 +286,6 @@ auto main(int argc, char* argv[]) -> int {
                     step_count);
     }
 
-    // ----------------------------------------------------------------
-    // Final conserved-integral drift report.  Compares the step-0 snapshot
-    // (captured above) against the end-of-run integrals.  Gated by
-    // diagnostics.conserved_integrals so the reference snapshot above and
-    // this final comparison toggle together as one logical feature.
-    // ----------------------------------------------------------------
     if (cfg.diagnostics.conserved_integrals) {
         const auto integrals_final =
             Verification::ComputeIntegrals(fields, grid, cfg, mpi);
@@ -352,15 +293,6 @@ auto main(int argc, char* argv[]) -> int {
                                   mpi.rank);
     }
 
-    // ----------------------------------------------------------------
-    // Outlet-plane diagnostics: mass flux and thrust.
-    //
-    // Both are MPI-collective; only ranks owning the outlet column
-    // (coords[0] == dims[0]-1) contribute, but every rank must call
-    // them because an MPI_Allreduce is performed internally.
-    //
-    // Gated by diagnostics.outlet_diagnostics.
-    // ----------------------------------------------------------------
     if (cfg.diagnostics.outlet_diagnostics) {
         const double mass_flux = Diagnostics::GetMassFlux(fields, grid, cfg, mpi);
         const double thrust    = Diagnostics::GetThrust  (fields, grid, cfg, mpi);

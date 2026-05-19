@@ -46,18 +46,51 @@ auto MaxWaveSpeed(const Fields& f, const SimConfig& cfg,
 auto ComputeDt(const Fields& f, const SimConfig& cfg,
                   int local_L, int local_M,
                   const MPIManager& mpi,
-                  double dt_current) -> double {
-    const double speed = MaxWaveSpeed(f, cfg, local_L, local_M, mpi);
+                  double dt_current,
+                  double& prev_max_speed,
+                  double speed_rtol) -> double {
 
-    // CFL-limited step: dt = C * dx / max_speed
-    // A small epsilon prevents division by zero in a perfectly quiescent field.
+    // ── Step 1: local max wave speed (cheap — no MPI) ───────────────────
+    double local_max = 0.0;
+
+    #pragma omp parallel for reduction(max : local_max)
+    for (int l = 1; l <= local_L; ++l) {
+        for (int m = 1; m <= local_M; ++m) {
+            const double cs = std::sqrt(cfg.gamma * f.p[l][m] / f.rho[l][m]);
+            const double ca = std::sqrt((f.H_z[l][m]*f.H_z[l][m]
+                                       + f.H_r[l][m]*f.H_r[l][m]
+                                       + f.H_phi[l][m]*f.H_phi[l][m])
+                                       / f.rho[l][m]);
+            const double v  = std::sqrt(f.v_z[l][m]*f.v_z[l][m]
+                                       + f.v_r[l][m]*f.v_r[l][m]);
+            local_max = std::max(local_max, v + cs + ca);
+        }
+    }
+
+    // ── Step 2: decide whether to run the global Allreduce ──────────────
+    double global_max = 0.0;
+    MPI_Allreduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX,
+                  MPI_COMM_WORLD);
+
+    // Decide which speed to use for the dt formula.
+    double speed_for_dt;
+    if (prev_max_speed > 0.0 &&
+        std::abs(global_max - prev_max_speed) <= speed_rtol * prev_max_speed) {
+        // Flow is steady enough — reuse the cached value so dt is smooth.
+        speed_for_dt = prev_max_speed;
+    } else {
+        // Speed has shifted noticeably; update the cache and use fresh value.
+        prev_max_speed = global_max;
+        speed_for_dt   = global_max;
+    }
+
+    // ── Step 3: CFL-limited dt ──────────────────────────────────────────
     const double dx     = std::min(cfg.dz, cfg.dy);
-    const double dt_cfl = cfg.cfl_number * dx / (speed + 1.0e-10);
+    const double dt_cfl = cfg.cfl_number * dx / (speed_for_dt + 1.0e-10);
 
     // Limit growth to prevent sudden jumps when wave speeds drop sharply.
     const double dt_grown = dt_current * cfg.dt_growth_factor;
 
-    // Apply growth cap first, then hard bounds.
     return std::clamp(std::min(dt_cfl, dt_grown), cfg.dt_min, cfg.dt_max);
 }
 

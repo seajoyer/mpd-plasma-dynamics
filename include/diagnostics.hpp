@@ -25,16 +25,20 @@ auto MaxWaveSpeed(const Fields& f, const SimConfig& cfg,
 ///      sudden large increases when wave speeds drop.
 ///   3. Clamped to [cfg.dt_min, cfg.dt_max].
 ///
-/// This function performs one MPI_Allreduce (for max_wave_speed) and
-/// must be called collectively by every rank.
-///
-/// @param dt_current  The dt used in the step that just completed.
-///                    Used to enforce the growth-rate limit.
-/// @return            Recommended dt for the *next* time step.
+/// @param dt_current     The dt used in the step that just completed.
+///                       Used to enforce the growth-rate limit.
+/// @param prev_max_speed In/out: cached max wave speed from the last full
+///                       Allreduce.  Negative → always run the Allreduce.
+///                       Updated on every call.
+/// @param speed_rtol     Relative tolerance for the skip decision.
+///                       Default 0.02 (2 %).
+/// @return               Recommended dt for the *next* time step.
 auto ComputeDt(const Fields& f, const SimConfig& cfg,
                   int local_L, int local_M,
                   const MPIManager& mpi,
-                  double dt_current) -> double;
+                  double dt_current,
+                  double& prev_max_speed,
+                  double speed_rtol = 0.02) -> double;
 
 /// Compute the relative change in the solution between the current
 /// fields and the fields stored in the prev arrays.
