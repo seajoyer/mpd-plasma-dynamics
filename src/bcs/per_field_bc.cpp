@@ -292,12 +292,6 @@ void PerFieldBC::Apply(BCContext& ctx) const {
     };
 
     // ================================================================
-    //  Macro-like helper (lambda) to evaluate one field and update the
-    //  expression cross-reference variable.
-    //  Used in BOTH the expression and simple paths to avoid duplication.
-    // ================================================================
-
-    // ================================================================
     //  L faces — iterate over m, fixed l
     // ================================================================
     if (is_l_face) {
@@ -500,7 +494,7 @@ auto PerFieldBC::AxisLfU1(const Fields& f, const Grid& g, int l, int m, double d
             + dt * (-(u0[l+1][m]/r[l+1][m]*vz[l+1][m]
                      -u0[l-1][m]/r[l-1][m]*vz[l-1][m]) / (2.0*dz)
                    -(u0[l][m+1]/r[l][m+1]*vr[l][m+1]
-                    -u0[l][m]  /r[l][m]  *vr[l][m+1]) / dr_l))
+                    -u0[l][m]  /r[l][m]  *vr[l][m]) / dr_l))
            * r[l][m];
 }
 

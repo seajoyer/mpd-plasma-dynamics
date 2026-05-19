@@ -11,19 +11,9 @@
 /// (the last axial column, at z = L − dz, i.e. global l-index L_max − 1):
 ///
 ///   MassFlux = ∫_{r_inner}^{r_outer}  ρ · v_z · 2π r · dr
-///   Thrust   = ∫_{r_inner}^{r_outer}  (ρ v_z² + p + |H|²/(8π)) · 2π r · dr
+///   Thrust   = ∫_{r_inner}^{r_outer} (ρ v_z² + p + |H|² * 0.5) · 2π r · dr
 ///
 /// where |H|² = H_z² + H_r² + H_phi².
-///
-/// Unit convention
-/// ───────────────
-/// The 1/(8π) factor in the magnetic-pressure term is the Gaussian-cgs
-/// form.  It matches the thrust stress tensor of Villani (1982) /
-/// Tkachenko et al. (2023).  Note that the solver's running quantity
-/// P = p + ½·|H|² uses a different (rationalised) normalisation internally;
-/// the Thrust expression below uses the 1/(8π) form directly because that
-/// is the physically meaningful nozzle-exit stress.  If you change unit
-/// conventions elsewhere, revisit GetThrust().
 ///
 /// Numerical scheme
 /// ────────────────
@@ -62,7 +52,7 @@ namespace Diagnostics {
 auto GetMassFlux(const Fields& f, const Grid& g,
                  const SimConfig& cfg, const MPIManager& mpi) -> double;
 
-/// Integrate (ρ v_z² + p + |H|²/(8π)) · 2π r dr over the outlet cross-section.
+/// Integrate (ρ v_z² + p + |H|² * 0.5) · 2π r dr over the outlet cross-section.
 ///
 /// Collective: must be called by every rank in MPI_COMM_WORLD.
 /// Returns the same value on every rank.

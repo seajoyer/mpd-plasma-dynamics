@@ -9,8 +9,7 @@ namespace Diagnostics {
 namespace {
 
 // ──────────────────────────────────────────────────────────────────────
-//  Outlet-plane integral using the composite trapezoid rule, correct
-//  for arbitrary 2-D MPI decomposition (both l-axis and m-axis split).
+//  Outlet-plane integral using the composite trapezoid rule.
 //
 //  Math
 //  ────
@@ -21,25 +20,10 @@ namespace {
 //
 //  with node weights
 //
-//      w(0) = w(M_max) = ½      (endpoints)
-//      w(m)             = 1     for 1 ≤ m ≤ M_max − 1
+//      w(0) = w(M_max) = ½     (endpoints)
+//      w(m)            = 1     for 1 ≤ m ≤ M_max − 1
 //
 //  and integrand F(m_g) = (physical integrand) · 2π · r  at node m_g.
-//
-//  Why this is parallel-friendly
-//  ─────────────────────────────
-//  Every global m-node is owned by **exactly one** rank in the current
-//  decomposition (m_start … m_end are non-overlapping, no duplicates),
-//  so each outlet rank can independently compute its partial sum over
-//  its own interior m-nodes using the correct global-index weight, and
-//  a single MPI_Allreduce produces the exact global integral — no
-//  "stitching" error at rank boundaries, no special handling for
-//  mpi_dims_m = 1 vs mpi_dims_m > 1.
-//
-//  Numerical equivalence to the serial trapezoid rule is exact in
-//  floating point modulo the (order-dependent) summation rounding;
-//  there is no additional discretisation error introduced by the
-//  decomposition.
 // ──────────────────────────────────────────────────────────────────────
 template <typename Integrand>
 auto IntegrateOutlet(const Fields& /*f*/, const Grid& g,
@@ -95,11 +79,10 @@ auto GetMassFlux(const Fields& f, const Grid& g,
 }
 
 // ──────────────────────────────────────────────────────────────────────
-//  Thrust:  ∫ (ρ v_z² + p + |H|²/(8π)) · 2π r dr
+//  Thrust:  ∫ (ρ v_z² + p + |H|²  0.5) · 2π r dr
 // ──────────────────────────────────────────────────────────────────────
 auto GetThrust(const Fields& f, const Grid& g,
                const SimConfig& cfg, const MPIManager& mpi) -> double {
-    constexpr double inv_8pi = 1.0 / (8.0 * M_PI);
 
     return IntegrateOutlet(f, g, cfg, mpi,
         [&](int l, int m) -> double {
@@ -107,7 +90,7 @@ auto GetThrust(const Fields& f, const Grid& g,
             const double H2   = f.H_z  [l][m] * f.H_z  [l][m]
                               + f.H_r  [l][m] * f.H_r  [l][m]
                               + f.H_phi[l][m] * f.H_phi[l][m];
-            return f.rho[l][m] * v_z2 + f.p[l][m] + H2 * inv_8pi;
+            return f.rho[l][m] * v_z2 + f.p[l][m] + H2 * 0.5;
         });
 }
 
