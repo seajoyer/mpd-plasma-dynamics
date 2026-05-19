@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "iboundary_condition.hpp"
 #include "config.hpp"
@@ -52,10 +53,16 @@
 ///
 /// Thread safety
 /// ─────────────
-/// When any field uses the Expression type, the internal exprtk state is
-/// shared across the boundary loop, so OpenMP parallelisation of that loop
-/// is suppressed automatically.  Non-expression segments retain their
-/// parallel loops.
+/// exprtk symbol tables hold mutable per-cell state and are not thread-safe
+/// when shared.  To keep the boundary loop parallel even when expressions
+/// are in use, PerFieldBC maintains one private ExprImpl instance per
+/// OpenMP thread (sized to omp_get_max_threads() at construction).  The
+/// parallel loop in Apply() indexes into this pool via omp_get_thread_num(),
+/// so each thread evaluates expressions against its own symbol table.
+///
+/// Per-thread state preserves the documented cross-field reference semantics:
+/// the rho → v_z → … → e ordering is *within* a single cell, and each
+/// thread evaluates one cell start-to-finish before moving to the next.
 class PerFieldBC : public IBoundaryCondition {
 public:
     /// @param face  Which of the four Cartesian faces this segment belongs to.
@@ -83,9 +90,9 @@ private:
     bool has_axis_lf_;      ///< true if any field uses AxisLF
     bool has_expressions_;  ///< true if any field uses Expression
 
-    // ---- Expression engine (null when has_expressions_ == false) ----
+    // ---- Per-thread expression engines (empty when has_expressions_ == false) ----
     struct ExprImpl;
-    std::unique_ptr<ExprImpl> expr_impl_;
+    std::vector<std::unique_ptr<ExprImpl>> expr_pool_;
 
     // ---- AxisLF stencil helpers (M_LO face, m = 1) ----
     //

@@ -7,6 +7,9 @@
 
 #include "bcs/per_field_bc.hpp"
 
+#include <omp.h>
+
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -17,9 +20,10 @@
 // ============================================================
 // ExprImpl — compiled per-cell boundary expressions
 //
-// One instance is shared by all calls to PerFieldBC::Apply().
-// The mutable symbol-table variables are written before each
-// cell evaluation so the expression sees the correct context.
+// One instance per OpenMP thread, indexed in PerFieldBC::expr_pool_
+// by omp_get_thread_num().  The mutable symbol-table variables are
+// written before each cell evaluation so the expression sees the
+// correct context.
 //
 // Cross-field references work within a single cell: after each
 // field is evaluated its result is written back to the
@@ -28,8 +32,8 @@
 //
 // Forward references (a field referencing one that comes later
 // in the order) see whatever value was left over from the
-// previous cell — typically meaningless.  Users should not rely
-// on forward references.
+// previous cell evaluated by the same thread — typically
+// meaningless.  Users should not rely on forward references.
 // ============================================================
 
 struct PerFieldBC::ExprImpl {
@@ -69,6 +73,14 @@ struct PerFieldBC::ExprImpl {
     // One entry per physical field, in evaluation order.
     CompiledField cf_rho, cf_v_z, cf_v_r, cf_v_phi;
     CompiledField cf_H_z, cf_H_r, cf_H_phi, cf_e;
+
+    // ExprImpl owns exprtk objects with internal pointers — must not be
+    // copied or moved, or expr→symtab bindings would break.
+    ExprImpl(const ExprImpl&) = delete;
+    auto operator=(const ExprImpl&) -> ExprImpl& = delete;
+    ExprImpl(ExprImpl&&) = delete;
+    auto operator=(ExprImpl&&) -> ExprImpl& = delete;
+
 
     // ----------------------------------------------------------------
     // Constructor: register all symbols and compile active expressions.
@@ -232,13 +244,26 @@ PerFieldBC::PerFieldBC(enum FaceBC::Face face, const BCSegmentConfig& seg)
     require_no_axis_lf(seg.H_r,   "H_r");
     require_no_axis_lf(seg.H_phi, "H_phi");
 
-    // ---- Build expression engine if needed ----
+    // ---- Build per-thread expression engines if needed ----
+    //
+    // Size the pool to omp_get_max_threads(): OpenMP guarantees that any
+    // subsequent parallel region has omp_get_thread_num() in
+    // [0, omp_get_max_threads()-1], so indexing by thread id is always
+    // in bounds even if the user later calls omp_set_num_threads() with
+    // a smaller value.
+    //
+    // If any expression fails to compile, the first ExprImpl constructor
+    // throws and the destructor of expr_pool_ cleans up any engines that
+    // were already constructed.  Subsequent threads share identical
+    // FieldCond inputs, so if the first succeeds the rest will too.
     if (has_expressions_) {
-        // ExprImpl constructor compiles all Expression-typed fields and throws
-        // std::runtime_error with a descriptive message on any syntax error.
-        expr_impl_ = std::make_unique<ExprImpl>(
-            seg.rho, seg.v_z, seg.v_r, seg.v_phi,
-            seg.H_z, seg.H_r, seg.H_phi, seg.e);
+        const int n_threads = std::max(1, omp_get_max_threads());
+        expr_pool_.reserve(static_cast<std::size_t>(n_threads));
+        for (int t = 0; t < n_threads; ++t) {
+            expr_pool_.emplace_back(std::make_unique<ExprImpl>(
+                seg.rho, seg.v_z, seg.v_r, seg.v_phi,
+                seg.H_z, seg.H_r, seg.H_phi, seg.e));
+        }
     }
 }
 
@@ -273,10 +298,11 @@ void PerFieldBC::Apply(BCContext& ctx) const {
             m_fix = mpi.local_M;  m_nb = mpi.local_M - 1;  break;
     }
 
-    // ---- Initialise expression physics constants (once per call) ----
-    // dr varies per l-index for M faces; it is set inside the loop below.
-    if (expr_impl_) {
-        expr_impl_->SetPhysics(cfg.gamma, cfg.beta, cfg.H_z0, g.r_0, dz, 0.0);
+    // ---- Initialise expression physics constants on every engine ----
+    if (has_expressions_) {
+        for (auto& impl : expr_pool_) {
+            impl->SetPhysics(cfg.gamma, cfg.beta, cfg.H_z0, g.r_0, dz, 0.0);
+        }
     }
 
     // ================================================================
@@ -301,12 +327,15 @@ void PerFieldBC::Apply(BCContext& ctx) const {
         const double z_l   = l_global * dz;
 
         if (has_expressions_) {
-            // ---- Expression path ----
+            // ---- Expression path (parallel; per-thread engine) ----
+            #pragma omp parallel for
             for (int m = ctx.local_lo; m <= ctx.local_hi; ++m) {
-                expr_impl_->dr_v = g.dr[l];
-                expr_impl_->SetSpatial(g.r[l][m],  g.r_z[l][m],  z_l,
-                                       g.r[ln][m], g.r_z[ln][m]);
-                expr_impl_->SetNeighbors(
+                ExprImpl& impl = *expr_pool_[omp_get_thread_num()];
+
+                impl.dr_v = g.dr[l];
+                impl.SetSpatial(g.r[l][m],  g.r_z[l][m],  z_l,
+                                g.r[ln][m], g.r_z[ln][m]);
+                impl.SetNeighbors(
                     f.rho[ln][m],   f.v_z[ln][m],   f.v_r[ln][m],   f.v_phi[ln][m],
                     f.e[ln][m],     f.H_z[ln][m],   f.H_r[ln][m],   f.H_phi[ln][m]);
 
@@ -314,44 +343,44 @@ void PerFieldBC::Apply(BCContext& ctx) const {
                 double val;
 
                 val = (rho_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_rho.expr.value()
+                          ? impl.cf_rho.expr.value()
                           : resolve(rho_, f.rho[l][m], f.rho[ln][m]);
-                f.rho[l][m] = val;   expr_impl_->rho_v = val;
+                f.rho[l][m] = val;   impl.rho_v = val;
 
                 val = (v_z_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_v_z.expr.value()
+                          ? impl.cf_v_z.expr.value()
                           : resolve(v_z_, f.v_z[l][m], f.v_z[ln][m]);
-                f.v_z[l][m] = val;   expr_impl_->v_z_v = val;
+                f.v_z[l][m] = val;   impl.v_z_v = val;
 
                 val = (v_r_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_v_r.expr.value()
+                          ? impl.cf_v_r.expr.value()
                           : resolve(v_r_, f.v_r[l][m], f.v_r[ln][m]);
-                f.v_r[l][m] = val;   expr_impl_->v_r_v = val;
+                f.v_r[l][m] = val;   impl.v_r_v = val;
 
                 val = (v_phi_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_v_phi.expr.value()
+                          ? impl.cf_v_phi.expr.value()
                           : resolve(v_phi_, f.v_phi[l][m], f.v_phi[ln][m]);
-                f.v_phi[l][m] = val; expr_impl_->v_phi_v = val;
+                f.v_phi[l][m] = val; impl.v_phi_v = val;
 
                 val = (H_z_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_H_z.expr.value()
+                          ? impl.cf_H_z.expr.value()
                           : resolve(H_z_, f.H_z[l][m], f.H_z[ln][m]);
-                f.H_z[l][m] = val;   expr_impl_->H_z_v = val;
+                f.H_z[l][m] = val;   impl.H_z_v = val;
 
                 val = (H_r_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_H_r.expr.value()
+                          ? impl.cf_H_r.expr.value()
                           : resolve(H_r_, f.H_r[l][m], f.H_r[ln][m]);
-                f.H_r[l][m] = val;   expr_impl_->H_r_v = val;
+                f.H_r[l][m] = val;   impl.H_r_v = val;
 
                 val = (H_phi_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_H_phi.expr.value()
+                          ? impl.cf_H_phi.expr.value()
                           : resolve(H_phi_, f.H_phi[l][m], f.H_phi[ln][m]);
-                f.H_phi[l][m] = val; expr_impl_->H_phi_v = val;
+                f.H_phi[l][m] = val; impl.H_phi_v = val;
 
                 val = (e_.type == FieldCondType::Expression)
-                          ? expr_impl_->cf_e.expr.value()
+                          ? impl.cf_e.expr.value()
                           : resolve(e_, f.e[l][m], f.e[ln][m]);
-                f.e[l][m] = val;     expr_impl_->e_v = val;
+                f.e[l][m] = val;     impl.e_v = val;
 
                 RebuildUFromPhysical(f, g, l, m);
                 // Note: AxisLF is not valid on L faces (validated in constructor).
@@ -380,63 +409,69 @@ void PerFieldBC::Apply(BCContext& ctx) const {
 
     const int m  = m_fix;
     const int mn = m_nb;
-    const bool is_lo = (face_ == FaceBC::Face::M_LO);
 
     if (has_expressions_) {
-        // ---- Expression path ----
+        // ---- Expression path (parallel; per-thread engine) ----
+        //
+        // AxisLF write targets (f.u_1/u_2/u_5/u_7 at [l][m]) are disjoint
+        // across iterations because each l owns its own row; the helpers
+        // read only f.u0_*, which is untouched by this BC.
+        #pragma omp parallel for
         for (int l = ctx.local_lo; l <= ctx.local_hi; ++l) {
+            ExprImpl& impl = *expr_pool_[omp_get_thread_num()];
+
             const int    l_global = mpi.l_start + l - 1;
             const double z_l      = l_global * dz;
             const double dr_l     = g.dr[l];
 
-            expr_impl_->dr_v = dr_l;
-            expr_impl_->SetSpatial(g.r[l][m],  g.r_z[l][m],  z_l,
-                                   g.r[l][mn], g.r_z[l][mn]);
-            expr_impl_->SetNeighbors(
+            impl.dr_v = dr_l;
+            impl.SetSpatial(g.r[l][m],  g.r_z[l][m],  z_l,
+                            g.r[l][mn], g.r_z[l][mn]);
+            impl.SetNeighbors(
                 f.rho[l][mn],   f.v_z[l][mn],   f.v_r[l][mn],   f.v_phi[l][mn],
                 f.e[l][mn],     f.H_z[l][mn],   f.H_r[l][mn],   f.H_phi[l][mn]);
 
             double val;
 
             val = (rho_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_rho.expr.value()
+                      ? impl.cf_rho.expr.value()
                       : resolve(rho_, f.rho[l][m], f.rho[l][mn]);
-            f.rho[l][m] = val;   expr_impl_->rho_v = val;
+            f.rho[l][m] = val;   impl.rho_v = val;
 
             val = (v_z_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_v_z.expr.value()
+                      ? impl.cf_v_z.expr.value()
                       : resolve(v_z_, f.v_z[l][m], f.v_z[l][mn]);
-            f.v_z[l][m] = val;   expr_impl_->v_z_v = val;
+            f.v_z[l][m] = val;   impl.v_z_v = val;
 
             val = (v_r_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_v_r.expr.value()
+                      ? impl.cf_v_r.expr.value()
                       : resolve(v_r_, f.v_r[l][m], f.v_r[l][mn]);
-            f.v_r[l][m] = val;   expr_impl_->v_r_v = val;
+            f.v_r[l][m] = val;   impl.v_r_v = val;
 
             val = (v_phi_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_v_phi.expr.value()
+                      ? impl.cf_v_phi.expr.value()
                       : resolve(v_phi_, f.v_phi[l][m], f.v_phi[l][mn]);
-            f.v_phi[l][m] = val; expr_impl_->v_phi_v = val;
+            f.v_phi[l][m] = val; impl.v_phi_v = val;
 
             val = (H_z_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_H_z.expr.value()
+                      ? impl.cf_H_z.expr.value()
                       : resolve(H_z_, f.H_z[l][m], f.H_z[l][mn]);
-            f.H_z[l][m] = val;   expr_impl_->H_z_v = val;
+            f.H_z[l][m] = val;   impl.H_z_v = val;
 
             val = (H_r_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_H_r.expr.value()
+                      ? impl.cf_H_r.expr.value()
                       : resolve(H_r_, f.H_r[l][m], f.H_r[l][mn]);
-            f.H_r[l][m] = val;   expr_impl_->H_r_v = val;
+            f.H_r[l][m] = val;   impl.H_r_v = val;
 
             val = (H_phi_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_H_phi.expr.value()
+                      ? impl.cf_H_phi.expr.value()
                       : resolve(H_phi_, f.H_phi[l][m], f.H_phi[l][mn]);
-            f.H_phi[l][m] = val; expr_impl_->H_phi_v = val;
+            f.H_phi[l][m] = val; impl.H_phi_v = val;
 
             val = (e_.type == FieldCondType::Expression)
-                      ? expr_impl_->cf_e.expr.value()
+                      ? impl.cf_e.expr.value()
                       : resolve(e_, f.e[l][m], f.e[l][mn]);
-            f.e[l][m] = val;     expr_impl_->e_v = val;
+            f.e[l][m] = val;     impl.e_v = val;
 
             // Step 2: rebuild conservative vars.
             RebuildUFromPhysical(f, g, l, m);
