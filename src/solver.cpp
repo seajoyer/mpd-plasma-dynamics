@@ -5,7 +5,8 @@
 #include <utility>
 
 // ============================================================
-// Constructor — build FaceBC objects from config
+// Constructor — build FaceBC objects from config, cache
+// invariant grid pointers and per-rank LF boundary offsets.
 // ============================================================
 
 Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
@@ -15,7 +16,18 @@ Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
       bc_l_hi_(FaceBC::FromConfig(FaceBC::Face::L_HI, cfg.bc_l_hi)),
       bc_m_lo_(FaceBC::FromConfig(FaceBC::Face::M_LO, cfg.bc_m_lo)),
       bc_m_hi_(FaceBC::FromConfig(FaceBC::Face::M_HI, cfg.bc_m_hi))
-{}
+{
+    // The LF kernel skips the boundary strips on M-boundary ranks because the
+    // M BCs will overwrite them.  These offsets are determined by the MPI
+    // decomposition (fixed at start-up) so we compute them once and cache.
+    m_lo_bc_ = mpi_.IsMLoBoundary() ? 2 : 1;
+    m_hi_bc_ = mpi_.IsMHiBoundary() ? mpi_.local_M - 1 : mpi_.local_M;
+
+    // Grid arrays never change after Grid::Build — bind their raw pointers
+    // once so the per-step kernel doesn't pay for Raw()/data() each call.
+    r_ptr_  = grid_.r.Raw();
+    dr_ptr_ = grid_.dr.data();
+}
 
 // ============================================================
 // Public entry point — with comm/compute overlap
@@ -26,8 +38,8 @@ void Solver::Advance(double dt) {
 
     const int local_L = mpi_.local_L;
     const int local_M = mpi_.local_M;
-    const int m_lo_bc = mpi_.IsMLoBoundary() ? 2 : 1;
-    const int m_hi_bc = mpi_.IsMHiBoundary() ? local_M - 1 : local_M;
+    const int m_lo_bc = m_lo_bc_;
+    const int m_hi_bc = m_hi_bc_;
 
     // Deep-interior bounds — cells whose 5-point stencil cannot reach any
     // ghost ring (l=0, l=local_L+1, m=0, m=local_M+1).  These can be updated
@@ -40,7 +52,7 @@ void Solver::Advance(double dt) {
     // ---- 1. Post non-blocking ghost exchanges -----------------------------
     PostGhostExchange();
 
-    // ---- 2. LF update on the deep interior (no ghost dependencies) --------
+    // ---- 2. LF update on the deep interior --------------------------------
     if (l_lo_inner <= l_hi_inner && m_lo_inner <= m_hi_inner) {
         ComputeCentralUpdateRange(l_lo_inner, l_hi_inner, m_lo_inner, m_hi_inner);
     }
@@ -144,7 +156,7 @@ void Solver::FinishGhostExchange() {
 }
 
 // ============================================================
-// Lax–Friedrichs central update — over an arbitrary (l, m) range
+// Lax–Friedrichs central update
 // ============================================================
 
 void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
@@ -168,8 +180,8 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
     auto** p     = f_.p.Raw();     auto** P    = f_.P.Raw();
     auto** H_z   = f_.H_z.Raw();   auto** H_r  = f_.H_r.Raw();
     auto** H_phi = f_.H_phi.Raw();
-    auto** r     = grid_.r.Raw();
-    const double* dr = grid_.dr.data();
+    const double** r  = r_ptr_;   // cached once in ctor
+    const double*  dr = dr_ptr_;  // cached once in ctor
     const double dt_inv_2dz = dt / (2.0 * dz);
 
     constexpr int kOmpCellThreshold = 2048;
@@ -188,88 +200,95 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
         const double* u0_7_lm = u0_7[l-1]; const double* u0_7_l = u0_7[l]; const double* u0_7_lp = u0_7[l+1];
         const double* u0_8_lm = u0_8[l-1]; const double* u0_8_l = u0_8[l]; const double* u0_8_lp = u0_8[l+1];
 
-        double* u_1_l  = u_1[l];  double* u_2_l  = u_2[l];
-        double* u_3_l  = u_3[l];  double* u_4_l  = u_4[l];
-        double* u_5_l  = u_5[l];  double* u_6_l  = u_6[l];
-        double* u_7_l  = u_7[l];  double* u_8_l  = u_8[l];
+        double* __restrict__ u_1_l = u_1[l];  double* __restrict__ u_2_l = u_2[l];
+        double* __restrict__ u_3_l = u_3[l];  double* __restrict__ u_4_l = u_4[l];
+        double* __restrict__ u_5_l = u_5[l];  double* __restrict__ u_6_l = u_6[l];
+        double* __restrict__ u_7_l = u_7[l];  double* __restrict__ u_8_l = u_8[l];
 
         const double* vz_lm  = v_z[l-1];   const double* vz_l  = v_z[l];   const double* vz_lp  = v_z[l+1];
-        const double* vr_lm  = v_r[l-1];                                   const double* vr_lp  = v_r[l+1];
-        const double* vphi_lm= v_phi[l-1];                                 const double* vphi_lp= v_phi[l+1];
+        const double* vr_lm  = v_r[l-1];   const double* vr_l  = v_r[l];   const double* vr_lp  = v_r[l+1];
+        const double* vphi_lm= v_phi[l-1]; const double* vphi_l= v_phi[l]; const double* vphi_lp= v_phi[l+1];
         const double* Hz_lm  = H_z[l-1];   const double* Hz_l  = H_z[l];   const double* Hz_lp  = H_z[l+1];
-        const double* Hr_lm  = H_r[l-1];                                   const double* Hr_lp  = H_r[l+1];
+        const double* Hr_lm  = H_r[l-1];   const double* Hr_l  = H_r[l];   const double* Hr_lp  = H_r[l+1];
         const double* Hphi_lm= H_phi[l-1]; const double* Hphi_l= H_phi[l]; const double* Hphi_lp= H_phi[l+1];
-        const double* P_lm   = P[l-1];                                     const double* P_lp   = P[l+1];
+        const double* P_lm   = P[l-1];     const double* P_l   = P[l];     const double* P_lp   = P[l+1];
         const double* p_l    = p[l];
         const double* r_lm   = r[l-1];     const double* r_l   = r[l];     const double* r_lp   = r[l+1];
         const double* rho_l  = rho[l];
-        const double* vphi_l = v_phi[l];
-        const double* Hphi_l2= H_phi[l];
 
+        #pragma omp simd
         for (int m = m_lo; m <= m_hi; ++m) {
+            // ── u_1 : ρ·r ────────────────────────────────────────────────
             u_1_l[m] =
                 0.25 * (u0_1_lp[m] + u0_1_lm[m] + u0_1_l[m+1] + u0_1_l[m-1])
                 - dt_inv_2dz  * (u0_1_lp[m]*vz_lp[m]   - u0_1_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_1_l[m+1]*vr_lp[m+1] - u0_1_l[m-1]*vr_lp[m-1]);
+                - dt_inv_2drl * (u0_1_l[m+1]*vr_l[m+1] - u0_1_l[m-1]*vr_l[m-1]);
 
+            // ── u_2 : ρ·v_z·r  (z-momentum) ─────────────────────────────
             u_2_l[m] =
                 0.25 * (u0_2_lp[m] + u0_2_lm[m] + u0_2_l[m+1] + u0_2_l[m-1])
                 + dt_inv_2dz  * ( (Hz_lp[m]*Hz_lp[m] - P_lp[m])*r_lp[m]
                                  -(Hz_lm[m]*Hz_lm[m] - P_lm[m])*r_lm[m])
-                + dt_inv_2drl * ( Hz_l[m+1]*Hr_lp[m+1]*r_l[m+1]
-                                 -Hz_l[m-1]*Hr_lp[m-1]*r_l[m-1])
+                + dt_inv_2drl * ( Hz_l[m+1]*Hr_l[m+1]*r_l[m+1]
+                                 -Hz_l[m-1]*Hr_l[m-1]*r_l[m-1])
                 - dt_inv_2dz  * (u0_2_lp[m]*vz_lp[m]   - u0_2_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_2_l[m+1]*vr_lp[m+1] - u0_2_l[m-1]*vr_lp[m-1]);
+                - dt_inv_2drl * (u0_2_l[m+1]*vr_l[m+1] - u0_2_l[m-1]*vr_l[m-1]);
 
+            // ── u_3 : ρ·v_r·r  (r-momentum) ─────────────────────────────
             u_3_l[m] =
                 0.25 * (u0_3_lp[m] + u0_3_lm[m] + u0_3_l[m+1] + u0_3_l[m-1])
-                + dt * (rho_l[m]*vphi_l[m]*vphi_l[m] + P_lp[m] - Hphi_l2[m]*Hphi_l2[m])
+                + dt * (rho_l[m]*vphi_l[m]*vphi_l[m] + P_l[m] - Hphi_l[m]*Hphi_l[m])
                 + dt_inv_2dz  * ( Hz_lp[m]*Hr_lp[m]*r_lp[m]
                                  -Hz_lm[m]*Hr_lm[m]*r_lm[m])
-                + dt_inv_2drl * ( (Hr_lp[m+1]*Hr_lp[m+1] - P_lp[m+1])*r_l[m+1]
-                                 -(Hr_lp[m-1]*Hr_lp[m-1] - P_lp[m-1])*r_l[m-1])
+                + dt_inv_2drl * ( (Hr_l[m+1]*Hr_l[m+1] - P_l[m+1])*r_l[m+1]
+                                 -(Hr_l[m-1]*Hr_l[m-1] - P_l[m-1])*r_l[m-1])
                 - dt_inv_2dz  * (u0_3_lp[m]*vz_lp[m]   - u0_3_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_3_l[m+1]*vr_lp[m+1] - u0_3_l[m-1]*vr_lp[m-1]);
+                - dt_inv_2drl * (u0_3_l[m+1]*vr_l[m+1] - u0_3_l[m-1]*vr_l[m-1]);
 
+            // ── u_4 : ρ·v_φ·r  (φ-momentum) ─────────────────────────────
             u_4_l[m] =
                 0.25 * (u0_4_lp[m] + u0_4_lm[m] + u0_4_l[m+1] + u0_4_l[m-1])
-                + dt * (-rho_l[m]*v_r[l][m]*vphi_l[m] + Hphi_l2[m]*Hr_lp[m])
+                + dt * (-rho_l[m]*vr_l[m]*vphi_l[m] + Hphi_l[m]*Hr_l[m])
                 + dt_inv_2dz  * ( Hphi_lp[m]*Hz_lp[m]*r_lp[m]
                                  -Hphi_lm[m]*Hz_lm[m]*r_lm[m])
-                + dt_inv_2drl * ( Hphi_l[m+1]*Hr_lp[m+1]*r_l[m+1]
-                                 -Hphi_l[m-1]*Hr_lp[m-1]*r_l[m-1])
+                + dt_inv_2drl * ( Hphi_l[m+1]*Hr_l[m+1]*r_l[m+1]
+                                 -Hphi_l[m-1]*Hr_l[m-1]*r_l[m-1])
                 - dt_inv_2dz  * (u0_4_lp[m]*vz_lp[m]   - u0_4_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_4_l[m+1]*vr_lp[m+1] - u0_4_l[m-1]*vr_lp[m-1]);
+                - dt_inv_2drl * (u0_4_l[m+1]*vr_l[m+1] - u0_4_l[m-1]*vr_l[m-1]);
 
+            // ── u_5 : ρ·e·r  (energy) ────────────────────────────────────
             u_5_l[m] =
                 0.25 * (u0_5_lp[m] + u0_5_lm[m] + u0_5_l[m+1] + u0_5_l[m-1])
                 - p_l[m] * (dt_inv_2dz  * (vz_lp[m]*r_lp[m]   - vz_lm[m]*r_lm[m])
-                           + dt_inv_2drl * (v_r[l][m+1]*r_l[m+1] - v_r[l][m-1]*r_l[m-1]))
+                           + dt_inv_2drl * (vr_l[m+1]*r_l[m+1] - vr_l[m-1]*r_l[m-1]))
                 - dt_inv_2dz  * (u0_5_lp[m]*vz_lp[m]   - u0_5_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_5_l[m+1]*vr_lp[m+1] - u0_5_l[m-1]*vr_lp[m-1]);
+                - dt_inv_2drl * (u0_5_l[m+1]*vr_l[m+1] - u0_5_l[m-1]*vr_l[m-1]);
 
+            // ── u_6 : H_φ ───────────────────────────────────────────────
             u_6_l[m] =
                 0.25 * (u0_6_lp[m] + u0_6_lm[m] + u0_6_l[m+1] + u0_6_l[m-1])
                 + dt_inv_2dz  * (Hz_lp[m]*vphi_lp[m]   - Hz_lm[m]*vphi_lm[m])
-                + dt_inv_2drl * (Hr_lp[m+1]*vphi_l[m+1] - Hr_lp[m-1]*vphi_l[m-1])
+                + dt_inv_2drl * (Hr_l[m+1]*vphi_l[m+1] - Hr_l[m-1]*vphi_l[m-1])
                 - dt_inv_2dz  * (u0_6_lp[m]*vz_lp[m]   - u0_6_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_6_l[m+1]*vr_lp[m+1] - u0_6_l[m-1]*vr_lp[m-1]);
+                - dt_inv_2drl * (u0_6_l[m+1]*vr_l[m+1] - u0_6_l[m-1]*vr_l[m-1]);
 
+            // ── u_7 : H_z·r ─────────────────────────────────────────────
             u_7_l[m] =
                 0.25 * (u0_7_lp[m] + u0_7_lm[m] + u0_7_l[m+1] + u0_7_l[m-1])
-                + dt_inv_2drl * (Hr_lp[m+1]*vz_l[m+1]*r_l[m+1] - Hr_lp[m-1]*vz_l[m-1]*r_l[m-1])
-                - dt_inv_2drl * (u0_7_l[m+1]*vr_lp[m+1] - u0_7_l[m-1]*vr_lp[m-1]);
+                + dt_inv_2drl * (Hr_l[m+1]*vz_l[m+1]*r_l[m+1] - Hr_l[m-1]*vz_l[m-1]*r_l[m-1])
+                - dt_inv_2drl * (u0_7_l[m+1]*vr_l[m+1] - u0_7_l[m-1]*vr_l[m-1]);
 
+            // ── u_8 : H_r·r ─────────────────────────────────────────────
             u_8_l[m] =
                 0.25 * (u0_8_lp[m] + u0_8_lm[m] + u0_8_l[m+1] + u0_8_l[m-1])
-                + dt_inv_2dz * (Hz_lp[m]*v_r[l+1][m]*r_lp[m] - Hz_lm[m]*v_r[l-1][m]*r_lm[m])
+                + dt_inv_2dz * (Hz_lp[m]*vr_lp[m]*r_lp[m] - Hz_lm[m]*vr_lm[m]*r_lm[m])
                 - dt_inv_2dz * (u0_8_lp[m]*vz_lp[m] - u0_8_lm[m]*vz_lm[m]);
         }
     }
 }
 
 void Solver::UpdateCentralPhysical() {
-    const int m_lo = mpi_.IsMLoBoundary() ? 2 : 1;
-    const int m_hi = mpi_.IsMHiBoundary() ? mpi_.local_M - 1 : mpi_.local_M;
-    f_.UpdatePhysicalFromU(grid_, cfg_, 1, mpi_.local_L, m_lo, m_hi);
+    // m_lo / m_hi are MPI-decomposition invariants — cached once in the
+    // constructor as m_lo_bc_ / m_hi_bc_.
+    f_.UpdatePhysicalFromU(grid_, cfg_, 1, mpi_.local_L, m_lo_bc_, m_hi_bc_);
 }

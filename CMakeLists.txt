@@ -67,6 +67,12 @@ set_source_files_properties(
     PROPERTIES COMPILE_FLAGS "-O1"
 )
 
+target_compile_options(${PROJECT_NAME} PRIVATE
+    $<$<CONFIG:Release>:-O3 -march=native>
+    $<$<CONFIG:RelWithDebInfo>:-O3 -march=native>
+    -fopenmp-simd
+)
+
 message(STATUS "Build type          : ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ compiler        : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ standard        : ${CMAKE_CXX_STANDARD}")

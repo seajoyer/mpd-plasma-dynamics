@@ -39,6 +39,15 @@ private:
     std::vector<double> col_batch_buf_;
     MPIManager::GhostExchangeHandle ghost_handle_;
 
+    // ---- cached constants (set once in the constructor) -------------------
+    // The LF central update writes over the boundary strip on M-boundary
+    // ranks where the BC will overwrite it anyway, so we skip those strips.
+    // These offsets never change after MPI decomposition is fixed at start-up.
+    int    m_lo_bc_{1};              ///< lowest interior m updated by the LF kernel
+    int    m_hi_bc_{1};              ///< highest interior m updated by the LF kernel
+    const double** r_ptr_{nullptr};  ///< grid_.r.Raw()  — bound once
+    const double*  dr_ptr_{nullptr};  ///< grid_.dr.data()  — bound once
+
     // ---- sub-steps ----
     void PostGhostExchange();
     void FinishGhostExchange();
