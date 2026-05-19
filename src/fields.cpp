@@ -204,19 +204,3 @@ void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
         }
     }
 }
-
-void Fields::CopyUToU0() {
-    #pragma omp parallel for
-    for (int l = 0; l < rows; ++l) {
-        for (int m = 0; m < cols; ++m) {
-            u0_1[l][m] = u_1[l][m];
-            u0_2[l][m] = u_2[l][m];
-            u0_3[l][m] = u_3[l][m];
-            u0_4[l][m] = u_4[l][m];
-            u0_5[l][m] = u_5[l][m];
-            u0_6[l][m] = u_6[l][m];
-            u0_7[l][m] = u_7[l][m];
-            u0_8[l][m] = u_8[l][m];
-        }
-    }
-}

@@ -80,7 +80,4 @@ public:
     /// conservative arrays, without paying to ship physical fields too.
     void UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
                               int l_lo, int l_hi, int m_lo, int m_hi);
-
-    /// Copy u_* → u0_* for all cells (including ghosts).
-    void CopyUToU0();
 };

@@ -11,26 +11,28 @@ namespace Diagnostics {
 // ============================================================
 // max_wave_speed
 // ============================================================
-
+//
 auto MaxWaveSpeed(const Fields& f, const SimConfig& cfg,
                       int local_L, int local_M,
                       const MPIManager& mpi) -> double {
+    const double gamma_gamma_m1 = cfg.gamma * (cfg.gamma - 1.0);
+
     double local_max = 0.0;
 
     #pragma omp parallel for reduction(max : local_max)
     for (int l = 1; l <= local_L; ++l) {
         for (int m = 1; m <= local_M; ++m) {
-            const double cs = std::sqrt(cfg.gamma * f.p[l][m] / f.rho[l][m]);
+            const double rho_inv = 1.0 / f.rho[l][m];
 
-            const double ca = std::sqrt((f.H_z[l][m]*f.H_z[l][m]
-                                       + f.H_r[l][m]*f.H_r[l][m]
-                                       + f.H_phi[l][m]*f.H_phi[l][m])
-                                       / f.rho[l][m]);
+            const double cs2 = gamma_gamma_m1 * f.e[l][m];
+            const double ca2 = (f.H_z  [l][m]*f.H_z  [l][m]
+                              + f.H_r  [l][m]*f.H_r  [l][m]
+                              + f.H_phi[l][m]*f.H_phi[l][m]) * rho_inv;
+            const double v2  = f.v_z[l][m]*f.v_z[l][m]
+                             + f.v_r[l][m]*f.v_r[l][m];
 
-            const double v = std::sqrt(f.v_z[l][m]*f.v_z[l][m]
-                                     + f.v_r[l][m]*f.v_r[l][m]);
-
-            local_max = std::max(local_max, v + cs + ca);
+            const double speed = std::sqrt(v2) + std::sqrt(cs2) + std::sqrt(ca2);
+            local_max = std::max(local_max, speed);
         }
     }
 
@@ -72,7 +74,9 @@ auto MinPhysicalCellSize(const SimConfig& cfg, const Grid& grid,
 // ============================================================
 // compute_dt
 // ============================================================
-
+//
+// Same c_s^2 = gamma*(gamma-1)*e identity as MaxWaveSpeed.
+//
 auto ComputeDt(const Fields& f, const SimConfig& cfg, const Grid& grid,
                   int local_L, int local_M,
                   const MPIManager& mpi,
@@ -81,19 +85,24 @@ auto ComputeDt(const Fields& f, const SimConfig& cfg, const Grid& grid,
                   double speed_rtol) -> double {
 
     // ── Step 1: local max wave speed ────────────────────────────────────
+    const double gamma_gamma_m1 = cfg.gamma * (cfg.gamma - 1.0);
+
     double local_max = 0.0;
 
     #pragma omp parallel for reduction(max : local_max)
     for (int l = 1; l <= local_L; ++l) {
         for (int m = 1; m <= local_M; ++m) {
-            const double cs = std::sqrt(cfg.gamma * f.p[l][m] / f.rho[l][m]);
-            const double ca = std::sqrt((f.H_z[l][m]*f.H_z[l][m]
-                                       + f.H_r[l][m]*f.H_r[l][m]
-                                       + f.H_phi[l][m]*f.H_phi[l][m])
-                                       / f.rho[l][m]);
-            const double v  = std::sqrt(f.v_z[l][m]*f.v_z[l][m]
-                                       + f.v_r[l][m]*f.v_r[l][m]);
-            local_max = std::max(local_max, v + cs + ca);
+            const double rho_inv = 1.0 / f.rho[l][m];
+
+            const double cs2 = gamma_gamma_m1 * f.e[l][m];
+            const double ca2 = (f.H_z  [l][m]*f.H_z  [l][m]
+                              + f.H_r  [l][m]*f.H_r  [l][m]
+                              + f.H_phi[l][m]*f.H_phi[l][m]) * rho_inv;
+            const double v2  = f.v_z[l][m]*f.v_z[l][m]
+                             + f.v_r[l][m]*f.v_r[l][m];
+
+            const double speed = std::sqrt(v2) + std::sqrt(cs2) + std::sqrt(ca2);
+            local_max = std::max(local_max, speed);
         }
     }
 
@@ -130,7 +139,12 @@ auto ComputeDt(const Fields& f, const SimConfig& cfg, const Grid& grid,
 // ============================================================
 // solution_change
 // ============================================================
-
+//
+// L2 relative change of the seven primary fields between the current
+// state and the previous snapshot.  The two partial sums (numerator and
+// denominator) are coalesced into a single MPI_Allreduce on a 2-element
+// buffer.
+//
 auto SolutionChange(const Fields& f, int local_L, int local_M) -> double {
     double sum_diff = 0.0;
     double sum_curr = 0.0;
@@ -158,12 +172,13 @@ auto SolutionChange(const Fields& f, int local_L, int local_M) -> double {
         }
     }
 
-    double g_diff = 0.0, g_curr = 0.0;
-    MPI_Allreduce(&sum_diff, &g_diff, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    MPI_Allreduce(&sum_curr, &g_curr, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    double local_sums [2] = { sum_diff, sum_curr };
+    double global_sums[2] = { 0.0,      0.0      };
+    MPI_Allreduce(local_sums, global_sums, 2, MPI_DOUBLE, MPI_SUM,
+                  MPI_COMM_WORLD);
 
-    const double norm_diff = std::sqrt(g_diff);
-    const double norm_curr = std::sqrt(g_curr);
+    const double norm_diff = std::sqrt(global_sums[0]);
+    const double norm_curr = std::sqrt(global_sums[1]);
     return (norm_curr > 1e-15) ? (norm_diff / norm_curr) : norm_diff;
 }
 

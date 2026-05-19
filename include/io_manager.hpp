@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "array2d.hpp"
 #include "config.hpp"
 #include "fields.hpp"
@@ -16,12 +17,17 @@
 /// is created.  The path is broadcast so every rank knows it.
 ///
 /// WriteFrame() is a collective call: all MPI ranks must invoke it
-/// together.  Point-to-point gather strategy:
-///   - Every non-zero rank sends (local_L × local_M) data blocks for each
-///     field, along with its (l_start, m_start, local_L, local_M) envelope,
-///     to rank 0.
-///   - Rank 0 receives sequentially and places each block into the matching
-///     region of the global array.
+/// together.  Gather strategy:
+///
+///   - The MPI decomposition is fixed at startup, so per-rank block sizes
+///     and global offsets are gathered *once* in the constructor via
+///     MPI_Gather (a single 4-int envelope per rank) and cached.
+///   - On each WriteFrame() every rank packs its 9 local field blocks
+///     into one contiguous send buffer (length = nfields × local_L ×
+///     local_M).  A single MPI_Gatherv collects every rank's buffer onto
+///     rank 0 in one collective.
+///   - Rank 0 unpacks each rank's segment into the 9 global Array2D
+///     buffers using the cached envelope.
 ///   - Rank 0 then writes the VTK file.
 class IOManager {
 public:
@@ -40,6 +46,27 @@ private:
     const MPIManager& mpi_;
     std::string run_dir_;
 
+    // Number of distributed fields gathered per frame:
+    //   rho, v_z, v_r, v_phi, e, H_z, H_r, H_phi, r          (= 9)
+    static constexpr int kNumFields = 9;
+
+    // ---- Cached gather metadata (built once in the constructor) ---------
+    std::vector<int> block_L_;    ///< [rank] = local_L  on that rank
+    std::vector<int> block_M_;    ///< [rank] = local_M  on that rank
+    std::vector<int> gl_;         ///< [rank] = l_start  on that rank
+    std::vector<int> gm_;         ///< [rank] = m_start  on that rank
+
+    // Per-rank length, in doubles, of the field payload in the gathered
+    // buffer (= kNumFields * block_L * block_M).  And displacements giving
+    // each rank's offset into the gather recv buffer.  Both have size
+    // mpi_.size on rank 0; empty elsewhere.
+    std::vector<int> recv_counts_;
+    std::vector<int> recv_displs_;
+
+    // Reusable buffers — keep capacity across WriteFrame calls.
+    std::vector<double> send_buf_;   ///< per-step pack of all 9 fields on this rank
+    std::vector<double> recv_buf_;   ///< rank-0 ragged gather of every rank's send
+
     // Global arrays, allocated on rank 0 the first time gather_global runs.
     Array2D rho_g_, v_z_g_, v_r_g_, v_phi_g_, e_g_;
     Array2D H_z_g_, H_r_g_, H_phi_g_, r_g_;
@@ -47,30 +74,20 @@ private:
 
     // ---- internal helpers ----
 
-    /// Gather all distributed field arrays to rank-0 global arrays using
-    /// point-to-point communication.
-    void GatherGlobal(const Fields& f, const Grid& grid);
+    /// One-shot: gather per-rank envelopes onto rank 0 and pre-compute
+    /// recv_counts_ / recv_displs_.  Called from the constructor.
+    void BuildGatherMetadata();
 
-    /// Flatten a local interior block [1..local_L][1..local_M] into a
-    /// contiguous send buffer of length local_L * local_M.
-    static void PackField(const Array2D& src, int local_L, int local_M,
-                           std::vector<double>& buf);
+    /// Pack this rank's nine local interior blocks into send_buf_ in field
+    /// order: rho, v_z, v_r, v_phi, e, H_z, H_r, H_phi, grid.r.  Each block
+    /// is stored row-major in (local_L × local_M) without ghost rows/cols.
+    void PackLocalBlocks(const Fields& f, const Grid& grid);
 
-    /// Scatter a flat buffer of length block_L * block_M into the global
-    /// array starting at (gl, gm).
-    static void UnpackIntoGlobal(Array2D& dst,
-                                   const std::vector<double>& buf,
-                                   int gl, int gm,
-                                   int block_L, int block_M);
-
-    /// Fill every cell in the global rank array owned by a given MPI rank.
-    /// Called on rank 0 only — no communication required because the block
-    /// geometry is already known from the gather envelope.
-    static void FillRankBlock(Array2D& dst, double rank_id,
-                                int gl, int gm,
-                                int block_L, int block_M);
+    /// Rank-0 only: unpack the gathered ragged buffer into the nine global
+    /// Array2D destinations, and (if requested) stamp the rank field.
+    void UnpackGlobalBlocks();
 
     /// Build and write a VTK structured-grid file from the global arrays.
-    /// Called by rank 0 only after GatherGlobal().
+    /// Called by rank 0 only after the gather.
     void WriteVtk(const std::string& filepath) const;
 };
