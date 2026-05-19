@@ -102,7 +102,7 @@ void MPIManager::ExchangeGhosts(double** arr, double* col_sl, double* col_sr,
 }
 
 // ============================================================
-// Batched ghost exchange — all N arrays, ONE message per direction
+// Batched ghost exchange — all N arrays, one message per direction
 // ============================================================
 
 void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
@@ -111,8 +111,8 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
     const int ncols = local_M_with_ghosts;
 
     // Merged buffer: 4 row sections (each n*ncols) + 4 col sections (each n*nrows)
-    const int row_seg = n * ncols;  // doubles per merged row direction message
-    const int col_seg = n * nrows;  // doubles per merged col direction message
+    const int row_seg = n * ncols;
+    const int col_seg = n * nrows;
     col_bufs.resize(static_cast<std::size_t>(4) * row_seg +
                     static_cast<std::size_t>(4) * col_seg);
 
@@ -126,7 +126,6 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
     double* col_rr = col_rl + col_seg;  // recv from m-hi
 
     // ---- Pack row sends (L-direction) using memcpy -------------------------
-    // Array2D rows are contiguous so this is a fast bulk copy.
     for (int i = 0; i < n; ++i) {
         double** a = arrs[i];
         if (nbr_l_lo != MPI_PROC_NULL) {
@@ -138,8 +137,6 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
     }
 
     // ---- Pack column sends (M-direction) -----------------------------------
-    // With contiguous Array2D storage, a[l][1] = slab_base + l*ncols + 1.
-    // Stride between elements is ncols — the CPU prefetcher handles this well.
     for (int i = 0; i < n; ++i) {
         double** a = arrs[i];
         double* sl = col_sl + i * nrows;
@@ -152,8 +149,7 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
         }
     }
 
-    // ---- Post ONE Isend + ONE Irecv per active direction -------------------
-    // Maximum 4 sends + 4 recvs = 8 MPI calls total (vs 72 in the old code).
+    // ---- Post one Isend + one Irecv per active direction -------------------
     MPI_Request reqs[8];
     int nreq = 0;
 

@@ -114,7 +114,7 @@ struct BCFaceConfig {
 
 /// All tuneable parameters for the MHD simulation.
 ///
-/// Primary source is config.yaml (loaded via SimConfig::load()).
+/// Primary source is config.yaml (loaded via SimConfig::Load()).
 /// Derived quantities (dz, dy) are computed automatically after loading.
 struct SimConfig {
     // ---- physics ----

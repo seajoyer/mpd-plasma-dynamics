@@ -65,7 +65,7 @@ public:
     /// Exchange one layer of ghost cells in all four Cartesian directions for
     /// a single 2-D array.
     ///
-    /// Prefer exchange_ghosts_batch() when exchanging multiple arrays at once.
+    /// Prefer ExchangeGhostsBatch() when exchanging multiple arrays at once.
     ///
     /// Column buffers (m-direction, packed sends):
     ///   col_sl / col_sr : send buffers, size >= local_L_with_ghosts

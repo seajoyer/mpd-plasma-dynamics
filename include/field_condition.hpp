@@ -84,8 +84,8 @@
 ///               and H_z respectively.  Valid on the M_LO face only.
 ///
 ///               The conserved u_* array is written directly; the physical
-///               variable is reconstructed at the end of Solver::advance()
-///               by Fields::update_physical_from_u(), so no explicit physical
+///               variable is reconstructed at the end of Solver::Advance()
+///               by Fields::UpdatePhysicalFromU(), so no explicit physical
 ///               assignment is needed here.
 ///
 ///               To reproduce the full axis-of-symmetry condition use AxisLF

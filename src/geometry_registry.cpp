@@ -27,7 +27,7 @@ auto GeometryRegistry::Create(const std::string& type, const YAML::Node& params)
     if (it == factories_.end()) {
         throw std::runtime_error("GeometryRegistry: unknown geometry type '" + type +
                                  "'.\n"
-                                 "  Did you forget to call register_all_geometries(), or "
+                                 "  Did you forget to call RegisterAllGeometries(), or "
                                  "mistype the name in config.yaml?");
     }
     return it->second(params);

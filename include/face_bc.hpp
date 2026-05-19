@@ -37,7 +37,7 @@ struct BCSegment {
 ///   4. Corner policy    — for the M_LO face, l=1 corners are excluded on l-lo
 ///                         boundary ranks and l=local_L corners are excluded on
 ///                         l-hi boundary ranks; this matches the BC application
-///                         order in Solver::advance().
+///                         order in Solver::Advance().
 ///
 /// Construction
 /// ─────────────

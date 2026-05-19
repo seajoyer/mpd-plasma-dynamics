@@ -130,7 +130,7 @@ void Solver::ComputeCentralUpdate() {
     const double* dr = grid_.dr.data();
     const double dt_inv_2dz = dt / (2.0 * dz);
 
-    // Parallelise on l only (not collapse(2)) — see performance notes above.
+    // Parallelise on l
     #pragma omp parallel for
     for (int l = 1; l <= local_L; ++l) {
         const double dt_inv_2drl = dt / (2.0 * dr[l]);

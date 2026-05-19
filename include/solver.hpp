@@ -13,14 +13,6 @@
 ///   3. Boundary conditions — dispatched through four FaceBC objects
 ///   4. Physical-variable reconstruction from conservative u
 ///   5. Advance u0 ← u
-///
-/// Boundary conditions are fully data-driven: each FaceBC holds an ordered
-/// list of BCSegment objects, one per contiguous region of the face.  The
-/// configuration is read from cfg (which was populated from config.yaml).
-///
-/// To add a new BC type, implement IBoundaryCondition, register it in
-/// register_all_bcs() (src/bc_registry.cpp), and reference the name in
-/// config.yaml — no changes to Solver are needed.
 class Solver {
 public:
     Solver(const SimConfig& cfg, const MPIManager& mpi,

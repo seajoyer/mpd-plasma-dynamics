@@ -5,11 +5,6 @@
 #include "grid.hpp"
 #include "mpi_manager.hpp"
 
-/// All data an IBoundaryCondition implementation might need.
-///
-/// Constructed cheaply (reference members only) by FaceBC::apply() for each
-/// active segment and passed by reference to IBoundaryCondition::apply().
-///
 /// Index semantics for local_lo / local_hi
 /// ─────────────────────────────────────────
 /// Each face has one *fixed* index and one *free* axis that the BC iterates.

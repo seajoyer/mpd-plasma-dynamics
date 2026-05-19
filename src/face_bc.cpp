@@ -114,7 +114,7 @@ void FaceBC::Apply(Fields& f, const Grid& g, const SimConfig& cfg, const MPIMana
         int local_lo, local_hi;
         if (!ClipToLocal(g_lo, g_hi, mpi, local_lo, local_hi)) continue;
 
-        // Corner policy for M_LO face (see Solver::advance() for ordering):
+        // Corner policy for M_LO face (see Solver::Advance() for ordering):
         // l=1 corners are owned by the L_LO BC on l-lo boundary ranks.
         // l=local_L corners are owned by the L_HI BC on l-hi boundary ranks.
         if (face_ == Face::M_LO) {

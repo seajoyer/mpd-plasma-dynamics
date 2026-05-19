@@ -10,7 +10,7 @@ class IGeometry;
 
 /// Singleton factory registry for IGeometry implementations.
 ///
-/// Populated at startup by register_all_geometries()
+/// Populated at startup by RegisterAllGeometries()
 /// (see src/geometry_registry.cpp).
 /// Looked up in main() when constructing the Grid.
 class GeometryRegistry {

@@ -170,18 +170,6 @@ static auto ParseFieldCond(const YAML::Node& n) -> FieldCond {
                         .expr_str = n["expr"].as<std::string>()};
             }
 
-            // ---- Removed preset names in verbose form ----
-            if (t == "wall_tangent") {
-                throw std::runtime_error(
-                    "config: { type: wall_tangent } is no longer supported.\n"
-                    "  See the 'wall_tangent' migration note above.");
-            }
-            if (t == "hphi_r0_over_r") {
-                throw std::runtime_error(
-                    "config: { type: hphi_r0_over_r } is no longer supported.\n"
-                    "  Use: H_phi: \"r_0 / r\"");
-            }
-
             throw std::runtime_error(
                 "config: unknown field condition type '" + t + "'.\n"
                 "  Valid types: neumann, dirichlet, expression, axis_lf.\n"

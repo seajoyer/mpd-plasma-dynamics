@@ -194,8 +194,6 @@ private:
 namespace {
 
 /// Extract the expression string for one field from the params node.
-/// Accepts a YAML scalar (bare number or quoted string) or absence / null.
-/// Rejects map-form nodes to catch accidental use of old preset syntax.
 auto ReadExpr(const YAML::Node& params, const char* key,
               const std::string& default_expr) -> std::string
 {

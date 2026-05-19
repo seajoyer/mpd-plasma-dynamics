@@ -49,7 +49,7 @@ public:
 
     /// Apply the initial condition to all interior cells [1..local_L][1..local_M]
     /// by delegating to ic.Apply().  Ghost cells are left at zero; they are
-    /// filled by the first ghost exchange inside Solver::advance().
+    /// filled by the first ghost exchange inside Solver::Advance().
     ///
     /// The IC sets all physical fields (rho, v_*, H_*, e) and the derived
     /// scalars (p, P) so the solver has a fully consistent state before the

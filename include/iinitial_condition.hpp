@@ -11,7 +11,7 @@ struct SimConfig;
 /// An IInitialCondition sets all physical fields (rho, v_z, v_r, v_phi,
 /// e, p, P, H_z, H_r, H_phi) for the interior cells owned by this rank.
 /// Ghost cells are left at their default-constructed zero values; they will
-/// be populated by the first ghost-exchange in Solver::advance().
+/// be populated by the first ghost-exchange in Solver::Advance().
 ///
 /// Implementations are registered by name in InitialConditionRegistry and
 /// selected at runtime via the `initial_conditions.type` field in config.yaml.

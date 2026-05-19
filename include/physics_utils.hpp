@@ -8,7 +8,7 @@
 ///
 /// Called by every boundary-condition implementation that sets physical
 /// variables (rho, v_*, H_*, e) and needs the conservative u_* arrays to
-/// match before the end-of-step update_physical_from_u() pass.
+/// match before the end-of-step UpdatePhysicalFromU() pass.
 ///
 /// This is a free inline function rather than a Solver member so that any
 /// IBoundaryCondition implementation can call it without depending on Solver.

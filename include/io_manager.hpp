@@ -15,7 +15,7 @@
 ///   <cfg.output_dir>/<cfg.run_name>_<DD-MM-YYYY_HH:MM:SS:mmm>/
 /// is created.  The path is broadcast so every rank knows it.
 ///
-/// write_frame() is a collective call: all MPI ranks must invoke it
+/// WriteFrame() is a collective call: all MPI ranks must invoke it
 /// together.  Point-to-point gather strategy:
 ///   - Every non-zero rank sends (local_L × local_M) data blocks for each
 ///     field, along with its (l_start, m_start, local_L, local_M) envelope,
@@ -71,6 +71,6 @@ private:
                                 int block_L, int block_M);
 
     /// Build and write a VTK structured-grid file from the global arrays.
-    /// Called by rank 0 only after gather_global().
+    /// Called by rank 0 only after GatherGlobal().
     void WriteVtk(const std::string& filepath) const;
 };
