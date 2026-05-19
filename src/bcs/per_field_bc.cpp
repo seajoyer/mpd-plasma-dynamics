@@ -46,7 +46,7 @@ struct PerFieldBC::ExprImpl {
     // Spatial at the boundary cell — set per cell.
     mutable T r_v{}, r_z_v{}, z_v{};
 
-    // Spatial at the interior neighbour — set per cell.
+    // Spatial at the interior-neighbour cell — set per cell.
     mutable T r_nb_v{}, r_z_nb_v{};
 
     // Interior-neighbour field values — set per cell.
@@ -256,11 +256,11 @@ void PerFieldBC::Apply(BCContext& ctx) const {
     const MPIManager& mpi = ctx.mpi;
     const double dt = ctx.dt;
     const double dz = cfg.dz;
+    const double gamma = cfg.gamma;
 
     const bool is_l_face = (face_ == FaceBC::Face::L_LO ||
                             face_ == FaceBC::Face::L_HI);
 
-    // ---- Fixed index and interior-neighbour index (fixed axis) ----
     int l_fix{}, m_fix{}, l_nb{}, m_nb{};
     switch (face_) {
         case FaceBC::Face::L_LO:
@@ -301,7 +301,7 @@ void PerFieldBC::Apply(BCContext& ctx) const {
         const double z_l   = l_global * dz;
 
         if (has_expressions_) {
-            // ---- Expression path (no OpenMP: shared exprtk state) ----
+            // ---- Expression path ----
             for (int m = ctx.local_lo; m <= ctx.local_hi; ++m) {
                 expr_impl_->dr_v = g.dr[l];
                 expr_impl_->SetSpatial(g.r[l][m],  g.r_z[l][m],  z_l,
@@ -383,7 +383,7 @@ void PerFieldBC::Apply(BCContext& ctx) const {
     const bool is_lo = (face_ == FaceBC::Face::M_LO);
 
     if (has_expressions_) {
-        // ---- Expression path (no OpenMP: shared exprtk state) ----
+        // ---- Expression path ----
         for (int l = ctx.local_lo; l <= ctx.local_hi; ++l) {
             const int    l_global = mpi.l_start + l - 1;
             const double z_l      = l_global * dz;
@@ -443,10 +443,10 @@ void PerFieldBC::Apply(BCContext& ctx) const {
 
             // Step 3: AxisLF overwrites (expressions and AxisLF can coexist).
             if (has_axis_lf_) {
-                if (rho_.type == FieldCondType::AxisLF) f.u_1[l][m] = AxisLfU1(f, g, l, m, dt, dz);
-                if (v_z_.type == FieldCondType::AxisLF) f.u_2[l][m] = AxisLfU2(f, g, l, m, dt, dz);
-                if (e_.type   == FieldCondType::AxisLF) f.u_5[l][m] = AxisLfU5(f, g, l, m, dt, dz);
-                if (H_z_.type == FieldCondType::AxisLF) f.u_7[l][m] = AxisLfU7(f, g, l, m, dt, dz);
+                if (rho_.type == FieldCondType::AxisLF) f.u_1[l][m] = AxisLfU1(f, g, l, m, dt, dz, gamma);
+                if (v_z_.type == FieldCondType::AxisLF) f.u_2[l][m] = AxisLfU2(f, g, l, m, dt, dz, gamma);
+                if (e_.type   == FieldCondType::AxisLF) f.u_5[l][m] = AxisLfU5(f, g, l, m, dt, dz, gamma);
+                if (H_z_.type == FieldCondType::AxisLF) f.u_7[l][m] = AxisLfU7(f, g, l, m, dt, dz, gamma);
             }
         }
     } else {
@@ -468,10 +468,10 @@ void PerFieldBC::Apply(BCContext& ctx) const {
 
             // Step 3: AxisLF overwrites (only on M_LO).
             if (has_axis_lf_) {
-                if (rho_.type == FieldCondType::AxisLF) f.u_1[l][m] = AxisLfU1(f, g, l, m, dt, dz);
-                if (v_z_.type == FieldCondType::AxisLF) f.u_2[l][m] = AxisLfU2(f, g, l, m, dt, dz);
-                if (e_.type   == FieldCondType::AxisLF) f.u_5[l][m] = AxisLfU5(f, g, l, m, dt, dz);
-                if (H_z_.type == FieldCondType::AxisLF) f.u_7[l][m] = AxisLfU7(f, g, l, m, dt, dz);
+                if (rho_.type == FieldCondType::AxisLF) f.u_1[l][m] = AxisLfU1(f, g, l, m, dt, dz, gamma);
+                if (v_z_.type == FieldCondType::AxisLF) f.u_2[l][m] = AxisLfU2(f, g, l, m, dt, dz, gamma);
+                if (e_.type   == FieldCondType::AxisLF) f.u_5[l][m] = AxisLfU5(f, g, l, m, dt, dz, gamma);
+                if (H_z_.type == FieldCondType::AxisLF) f.u_7[l][m] = AxisLfU7(f, g, l, m, dt, dz, gamma);
             }
         }
     }
@@ -480,81 +480,165 @@ void PerFieldBC::Apply(BCContext& ctx) const {
 // ============================================================
 // AxisLF stencil helpers
 // ============================================================
+//
+// All four helpers read time-n physical state by deriving it from the
+// conservative arrays f.u0_*, which carry the unmodified time-n values
+// throughout Solver::Advance() (the u_*/u0_* swap happens only at the very
+// end of the step).  This makes the helpers immune to call-order issues:
+// they would produce identical results whether invoked before or after
+// Solver::UpdateCentralPhysical() rewrites f.rho / f.v_* / f.H_* / f.p /
+// f.P to time n+1 in the deep interior.
+//
+// Time-n physical quantities from u0_*:
+//
+//   rho   = u0_1 / r
+//   v_z   = u0_2 / u0_1
+//   v_r   = u0_3 / u0_1
+//   H_phi = u0_6
+//   H_z   = u0_7 / r
+//   H_r   = u0_8 / r
+//   p     = (gamma - 1) * u0_5 / r       (= (gamma - 1) * rho * e)
+//   P     = p + ½(H_z² + H_r² + H_phi²)
+//
+// These have been symbolically verified to reproduce the previous formulas
+// exactly when all of f.v_*, f.H_*, f.p, f.P are at time n.
 
 auto PerFieldBC::AxisLfU1(const Fields& f, const Grid& g, int l, int m, double dt,
-                           double dz) -> double {
-    auto** u0 = f.u0_1.Raw();
-    auto** vz = f.v_z.Raw();
-    auto** vr = f.v_r.Raw();
-    auto** r  = g.r.Raw();
+                           double dz, double /*gamma*/) -> double {
+    auto** u0_1 = f.u0_1.Raw();
+    auto** u0_2 = f.u0_2.Raw();
+    auto** u0_3 = f.u0_3.Raw();
+    auto** r    = g.r.Raw();
     const double dr_l = g.dr[l];
 
-    return (0.25 * (u0[l+1][m]/r[l+1][m] + u0[l-1][m]/r[l-1][m]
-                  + u0[l][m+1]/r[l][m+1] + u0[l][m]  /r[l][m])
-            + dt * (-(u0[l+1][m]/r[l+1][m]*vz[l+1][m]
-                     -u0[l-1][m]/r[l-1][m]*vz[l-1][m]) / (2.0*dz)
-                   -(u0[l][m+1]/r[l][m+1]*vr[l][m+1]
-                    -u0[l][m]  /r[l][m]  *vr[l][m]) / dr_l))
+    // u_1 = rho·r ; half-stencil computes (u_1/r) = rho.
+    // (u_1/r)·v_z  →  u0_2 / r  (axial mass flux density)
+    // (u_1/r)·v_r  →  u0_3 / r  (radial mass flux density)
+    const double rho_lp = u0_1[l+1][m] / r[l+1][m];
+    const double rho_lm = u0_1[l-1][m] / r[l-1][m];
+    const double rho_mp = u0_1[l][m+1] / r[l][m+1];
+    const double rho_c  = u0_1[l][m]   / r[l][m];
+
+    const double mz_lp = u0_2[l+1][m] / r[l+1][m];
+    const double mz_lm = u0_2[l-1][m] / r[l-1][m];
+    const double mr_mp = u0_3[l][m+1] / r[l][m+1];
+    const double mr_c  = u0_3[l][m]   / r[l][m];
+
+    return (0.25 * (rho_lp + rho_lm + rho_mp + rho_c)
+            + dt * (-(mz_lp - mz_lm) / (2.0 * dz)
+                   -(mr_mp - mr_c)   / dr_l))
            * r[l][m];
 }
 
 auto PerFieldBC::AxisLfU2(const Fields& f, const Grid& g, int l, int m, double dt,
-                           double dz) -> double {
-    auto** u0 = f.u0_2.Raw();
-    auto** vz = f.v_z.Raw();
-    auto** vr = f.v_r.Raw();
-    auto** Hz = f.H_z.Raw();
-    auto** Hr = f.H_r.Raw();
-    auto** P  = f.P.Raw();
-    auto** r  = g.r.Raw();
-    const double dr_l = g.dr[l];
+                           double dz, double gamma) -> double {
+    auto** u0_1 = f.u0_1.Raw();
+    auto** u0_2 = f.u0_2.Raw();
+    auto** u0_3 = f.u0_3.Raw();
+    auto** u0_5 = f.u0_5.Raw();
+    auto** u0_6 = f.u0_6.Raw();
+    auto** u0_7 = f.u0_7.Raw();
+    auto** u0_8 = f.u0_8.Raw();
+    auto** r    = g.r.Raw();
+    const double dr_l     = g.dr[l];
+    const double gamma_m1 = gamma - 1.0;
 
-    return (0.25 * (u0[l+1][m]/r[l+1][m] + u0[l-1][m]/r[l-1][m]
-                  + u0[l][m+1]/r[l][m+1] + u0[l][m]  /r[l][m])
-            + dt * (((Hz[l+1][m]*Hz[l+1][m] - P[l+1][m])
-                    -(Hz[l-1][m]*Hz[l-1][m] - P[l-1][m])) / (2.0*dz)
-                   +(Hz[l][m+1]*Hr[l][m+1] - Hz[l][m]*Hr[l][m]) / dr_l
-                   -(u0[l+1][m]/r[l+1][m]*vz[l+1][m]
-                    -u0[l-1][m]/r[l-1][m]*vz[l-1][m]) / (2.0*dz)
-                   -(u0[l][m+1]/r[l][m+1]*vr[l][m+1]
-                    -u0[l][m]  /r[l][m]  *vr[l][m])   / dr_l))
-           * r[l][m];
+    // Time-n physical lookups, all derived from u0_*.
+    auto Hz = [&](int li, int mi) { return u0_7[li][mi] / r[li][mi]; };
+    auto Hr = [&](int li, int mi) { return u0_8[li][mi] / r[li][mi]; };
+    auto P_tot = [&](int li, int mi) {
+        const double hz   = Hz(li, mi);
+        const double hr   = Hr(li, mi);
+        const double hphi = u0_6[li][mi];
+        const double p    = gamma_m1 * u0_5[li][mi] / r[li][mi];
+        return p + 0.5 * (hz*hz + hr*hr + hphi*hphi);
+    };
+    // (u_2/r) = ρ·v_z
+    auto rhoVz   = [&](int li, int mi) { return u0_2[li][mi] / r[li][mi]; };
+    // (u_2/r)·v_z = ρ·v_z²  =  u0_2² / (r · u0_1)
+    auto rhoVzVz = [&](int li, int mi) {
+        return u0_2[li][mi] * u0_2[li][mi] / (r[li][mi] * u0_1[li][mi]);
+    };
+    // (u_2/r)·v_r = ρ·v_z·v_r  =  u0_2·u0_3 / (r · u0_1)
+    auto rhoVzVr = [&](int li, int mi) {
+        return u0_2[li][mi] * u0_3[li][mi] / (r[li][mi] * u0_1[li][mi]);
+    };
+
+    const double avg = 0.25 * (rhoVz(l+1, m) + rhoVz(l-1, m)
+                             + rhoVz(l, m+1) + rhoVz(l, m));
+
+    const double t1 =  ((Hz(l+1, m)*Hz(l+1, m) - P_tot(l+1, m))
+                       -(Hz(l-1, m)*Hz(l-1, m) - P_tot(l-1, m))) / (2.0 * dz);
+    const double t2 =  (Hz(l, m+1)*Hr(l, m+1) - Hz(l, m)*Hr(l, m)) / dr_l;
+    const double t3 = -(rhoVzVz(l+1, m) - rhoVzVz(l-1, m)) / (2.0 * dz);
+    const double t4 = -(rhoVzVr(l, m+1) - rhoVzVr(l, m))   / dr_l;
+
+    return (avg + dt * (t1 + t2 + t3 + t4)) * r[l][m];
 }
 
 auto PerFieldBC::AxisLfU5(const Fields& f, const Grid& g, int l, int m, double dt,
-                           double dz) -> double {
-    auto** u0 = f.u0_5.Raw();
-    auto** vz = f.v_z.Raw();
-    auto** vr = f.v_r.Raw();
-    auto** p  = f.p.Raw();
-    auto** r  = g.r.Raw();
-    const double dr_l = g.dr[l];
+                           double dz, double gamma) -> double {
+    auto** u0_1 = f.u0_1.Raw();
+    auto** u0_2 = f.u0_2.Raw();
+    auto** u0_3 = f.u0_3.Raw();
+    auto** u0_5 = f.u0_5.Raw();
+    auto** r    = g.r.Raw();
+    const double dr_l     = g.dr[l];
+    const double gamma_m1 = gamma - 1.0;
 
-    return (0.25 * (u0[l+1][m]/r[l+1][m] + u0[l-1][m]/r[l-1][m]
-                  + u0[l][m+1]/r[l][m+1] + u0[l][m]  /r[l][m])
-            + dt * (-p[l][m] * ((vz[l+1][m]-vz[l-1][m]) / (2.0*dz)
-                               +(vr[l][m+1]-vr[l][m])    / dr_l)
-                   -(u0[l+1][m]/r[l+1][m]*vz[l+1][m]
-                    -u0[l-1][m]/r[l-1][m]*vz[l-1][m]) / (2.0*dz)
-                   -(u0[l][m+1]/r[l][m+1]*vr[l][m+1]
-                    -u0[l][m]  /r[l][m]  *vr[l][m])   / dr_l))
-           * r[l][m];
+    // u_5 = ρ·e·r ; half-stencil computes (u_5/r) = ρ·e.
+    auto rhoE = [&](int li, int mi) { return u0_5[li][mi] / r[li][mi]; };
+    auto v_z  = [&](int li, int mi) { return u0_2[li][mi] / u0_1[li][mi]; };
+    auto v_r  = [&](int li, int mi) { return u0_3[li][mi] / u0_1[li][mi]; };
+    // (u_5/r)·v_z = ρ·e·v_z  =  u0_5·u0_2 / (r · u0_1)
+    auto rhoEvz = [&](int li, int mi) {
+        return u0_5[li][mi] * u0_2[li][mi] / (r[li][mi] * u0_1[li][mi]);
+    };
+    // (u_5/r)·v_r = ρ·e·v_r  =  u0_5·u0_3 / (r · u0_1)
+    auto rhoEvr = [&](int li, int mi) {
+        return u0_5[li][mi] * u0_3[li][mi] / (r[li][mi] * u0_1[li][mi]);
+    };
+
+    // Cell-centred pressure (time n).
+    const double p_c = gamma_m1 * u0_5[l][m] / r[l][m];
+
+    const double avg = 0.25 * (rhoE(l+1, m) + rhoE(l-1, m)
+                             + rhoE(l, m+1) + rhoE(l, m));
+
+    // -p·(∂v_z/∂z + ∂v_r/∂r)
+    const double divv = (v_z(l+1, m) - v_z(l-1, m)) / (2.0 * dz)
+                      + (v_r(l, m+1) - v_r(l, m))   / dr_l;
+    const double t_pdv = -p_c * divv;
+
+    const double t_az = -(rhoEvz(l+1, m) - rhoEvz(l-1, m)) / (2.0 * dz);
+    const double t_ar = -(rhoEvr(l, m+1) - rhoEvr(l, m))   / dr_l;
+
+    return (avg + dt * (t_pdv + t_az + t_ar)) * r[l][m];
 }
 
 auto PerFieldBC::AxisLfU7(const Fields& f, const Grid& g, int l, int m, double dt,
-                           double dz) -> double {
-    auto** u0 = f.u0_7.Raw();
-    auto** vz = f.v_z.Raw();
-    auto** vr = f.v_r.Raw();
-    auto** Hz = f.H_z.Raw();
-    auto** Hr = f.H_r.Raw();
-    auto** r  = g.r.Raw();
+                           double /*dz*/, double /*gamma*/) -> double {
+    auto** u0_1 = f.u0_1.Raw();
+    auto** u0_2 = f.u0_2.Raw();
+    auto** u0_3 = f.u0_3.Raw();
+    auto** u0_7 = f.u0_7.Raw();
+    auto** u0_8 = f.u0_8.Raw();
+    auto** r    = g.r.Raw();
     const double dr_l = g.dr[l];
 
-    return (0.25 * (u0[l+1][m]/r[l+1][m] + u0[l-1][m]/r[l-1][m]
-                  + u0[l][m+1]/r[l][m+1] + u0[l][m]  /r[l][m])
-            + dt * ((Hr[l][m+1]*vz[l][m+1] - Hr[l][m]*vz[l][m]) / dr_l
-                   -(u0[l][m+1]/r[l][m+1]*vr[l][m+1]
-                    -u0[l][m]  /r[l][m]  *vr[l][m])              / dr_l))
-           * r[l][m];
+    // u_7 = H_z·r ; half-stencil computes (u_7/r) = H_z.
+    auto Hz = [&](int li, int mi) { return u0_7[li][mi] / r[li][mi]; };
+    auto Hr = [&](int li, int mi) { return u0_8[li][mi] / r[li][mi]; };
+    auto vz = [&](int li, int mi) { return u0_2[li][mi] / u0_1[li][mi]; };
+    auto vr = [&](int li, int mi) { return u0_3[li][mi] / u0_1[li][mi]; };
+
+    // (No z-derivative source terms — axis induction equation has only the
+    // radial half-stencil.)
+    const double avg = 0.25 * (Hz(l+1, m) + Hz(l-1, m)
+                             + Hz(l, m+1) + Hz(l, m));
+
+    const double t_src  =  (Hr(l, m+1)*vz(l, m+1) - Hr(l, m)*vz(l, m)) / dr_l;
+    const double t_advr = -(Hz(l, m+1)*vr(l, m+1) - Hz(l, m)*vr(l, m)) / dr_l;
+
+    return (avg + dt * (t_src + t_advr)) * r[l][m];
 }

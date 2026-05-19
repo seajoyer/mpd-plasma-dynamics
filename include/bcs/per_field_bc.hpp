@@ -32,6 +32,15 @@
 ///   AxisLF       Half-stencil Lax–Friedrichs update for the axis of symmetry.
 ///                Valid only for rho / v_z / e / H_z on the M_LO face.
 ///
+///                Time-level consistency: the AxisLF helpers derive every
+///                physical quantity they need directly from the conservative
+///                arrays f.u0_*, which carry the time-n state throughout
+///                the entire Solver::Advance() call.  This guarantees the
+///                half-stencil reads time-n neighbour values, matching the
+///                semantics of the central LF kernel — even though the BC
+///                runs after Solver::UpdateCentralPhysical() has rewritten
+///                the physical field arrays to time n+1 for interior cells.
+///
 /// Step flow for each boundary cell
 /// ─────────────────────────────────
 ///   1. Evaluate Neumann / Dirichlet / Expression conditions for each field
@@ -79,12 +88,15 @@ private:
     std::unique_ptr<ExprImpl> expr_impl_;
 
     // ---- AxisLF stencil helpers (M_LO face, m = 1) ----
+    //
+    // All four helpers read time-n state from f.u0_*; gamma is passed in
+    // because AxisLfU2 / AxisLfU5 need it to reconstruct the time-n pressure.
     static auto AxisLfU1(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz) -> double;
+                              int l, int m, double dt, double dz, double gamma) -> double;
     static auto AxisLfU2(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz) -> double;
+                              int l, int m, double dt, double dz, double gamma) -> double;
     static auto AxisLfU5(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz) -> double;
+                              int l, int m, double dt, double dz, double gamma) -> double;
     static auto AxisLfU7(const Fields& f, const Grid& g,
-                              int l, int m, double dt, double dz) -> double;
+                              int l, int m, double dt, double dz, double gamma) -> double;
 };
