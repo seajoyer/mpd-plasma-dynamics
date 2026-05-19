@@ -105,8 +105,9 @@ void MPIManager::ExchangeGhosts(double** arr, double* col_sl, double* col_sr,
 // Batched ghost exchange — all N arrays, one message per direction
 // ============================================================
 
-void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
-                                     std::vector<double>& col_bufs) const {
+void MPIManager::PostGhostsBatch(double** const* arrs, int n,
+                                 std::vector<double>& col_bufs,
+                                 GhostExchangeHandle& h) const {
     const int nrows = local_L_with_ghosts;
     const int ncols = local_M_with_ghosts;
 
@@ -116,14 +117,14 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
     col_bufs.resize(static_cast<std::size_t>(4) * row_seg +
                     static_cast<std::size_t>(4) * col_seg);
 
-    double* row_sl = col_bufs.data();   // send to l-lo
-    double* row_sr = row_sl + row_seg;  // send to l-hi
-    double* row_rl = row_sr + row_seg;  // recv from l-lo
-    double* row_rr = row_rl + row_seg;  // recv from l-hi
-    double* col_sl = row_rr + row_seg;  // send to m-lo
-    double* col_sr = col_sl + col_seg;  // send to m-hi
-    double* col_rl = col_sr + col_seg;  // recv from m-lo
-    double* col_rr = col_rl + col_seg;  // recv from m-hi
+    double* row_sl = col_bufs.data();
+    double* row_sr = row_sl + row_seg;
+    double* row_rl = row_sr + row_seg;
+    double* row_rr = row_rl + row_seg;
+    double* col_sl = row_rr + row_seg;
+    double* col_sr = col_sl + col_seg;
+    double* col_rl = col_sr + col_seg;
+    double* col_rr = col_rl + col_seg;
 
     // ---- Pack row sends (L-direction) using memcpy -------------------------
     for (int i = 0; i < n; ++i) {
@@ -150,29 +151,44 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
     }
 
     // ---- Post one Isend + one Irecv per active direction -------------------
-    MPI_Request reqs[8];
-    int nreq = 0;
+    h.nreq = 0;
 
     if (nbr_l_lo != MPI_PROC_NULL) {
-        MPI_Isend(row_sl, row_seg, MPI_DOUBLE, nbr_l_lo, 0, cart_comm, &reqs[nreq++]);
-        MPI_Irecv(row_rl, row_seg, MPI_DOUBLE, nbr_l_lo, 1, cart_comm, &reqs[nreq++]);
+        MPI_Isend(row_sl, row_seg, MPI_DOUBLE, nbr_l_lo, 0, cart_comm, &h.reqs[h.nreq++]);
+        MPI_Irecv(row_rl, row_seg, MPI_DOUBLE, nbr_l_lo, 1, cart_comm, &h.reqs[h.nreq++]);
     }
     if (nbr_l_hi != MPI_PROC_NULL) {
-        MPI_Isend(row_sr, row_seg, MPI_DOUBLE, nbr_l_hi, 1, cart_comm, &reqs[nreq++]);
-        MPI_Irecv(row_rr, row_seg, MPI_DOUBLE, nbr_l_hi, 0, cart_comm, &reqs[nreq++]);
+        MPI_Isend(row_sr, row_seg, MPI_DOUBLE, nbr_l_hi, 1, cart_comm, &h.reqs[h.nreq++]);
+        MPI_Irecv(row_rr, row_seg, MPI_DOUBLE, nbr_l_hi, 0, cart_comm, &h.reqs[h.nreq++]);
     }
     if (nbr_m_lo != MPI_PROC_NULL) {
-        MPI_Isend(col_sl, col_seg, MPI_DOUBLE, nbr_m_lo, 2, cart_comm, &reqs[nreq++]);
-        MPI_Irecv(col_rl, col_seg, MPI_DOUBLE, nbr_m_lo, 3, cart_comm, &reqs[nreq++]);
+        MPI_Isend(col_sl, col_seg, MPI_DOUBLE, nbr_m_lo, 2, cart_comm, &h.reqs[h.nreq++]);
+        MPI_Irecv(col_rl, col_seg, MPI_DOUBLE, nbr_m_lo, 3, cart_comm, &h.reqs[h.nreq++]);
     }
     if (nbr_m_hi != MPI_PROC_NULL) {
-        MPI_Isend(col_sr, col_seg, MPI_DOUBLE, nbr_m_hi, 3, cart_comm, &reqs[nreq++]);
-        MPI_Irecv(col_rr, col_seg, MPI_DOUBLE, nbr_m_hi, 2, cart_comm, &reqs[nreq++]);
+        MPI_Isend(col_sr, col_seg, MPI_DOUBLE, nbr_m_hi, 3, cart_comm, &h.reqs[h.nreq++]);
+        MPI_Irecv(col_rr, col_seg, MPI_DOUBLE, nbr_m_hi, 2, cart_comm, &h.reqs[h.nreq++]);
     }
+}
 
-    if (nreq > 0) {
-        MPI_Waitall(nreq, reqs, MPI_STATUSES_IGNORE);
+void MPIManager::WaitAndUnpackGhostsBatch(double** const* arrs, int n,
+                                          std::vector<double>& col_bufs,
+                                          GhostExchangeHandle& h) const {
+    const int nrows = local_L_with_ghosts;
+    const int ncols = local_M_with_ghosts;
+    const int row_seg = n * ncols;
+    const int col_seg = n * nrows;
+
+    // Re-derive recv buffer pointers — same layout as PostGhostsBatch
+    double* row_rl = col_bufs.data() + 2 * row_seg;
+    double* row_rr = row_rl + row_seg;
+    double* col_rl = col_bufs.data() + 4 * row_seg + 2 * col_seg;
+    double* col_rr = col_rl + col_seg;
+
+    if (h.nreq > 0) {
+        MPI_Waitall(h.nreq, h.reqs, MPI_STATUSES_IGNORE);
     }
+    h.nreq = 0;
 
     // ---- Unpack row receives (L-direction) using memcpy --------------------
     for (int i = 0; i < n; ++i) {
@@ -197,4 +213,11 @@ void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
             for (int l = 0; l < nrows; ++l) a[l][local_M + 1] = rr[l];
         }
     }
+}
+
+void MPIManager::ExchangeGhostsBatch(double** const* arrs, int n,
+                                     std::vector<double>& col_bufs) const {
+    GhostExchangeHandle h;
+    PostGhostsBatch(arrs, n, col_bufs, h);
+    WaitAndUnpackGhostsBatch(arrs, n, col_bufs, h);
 }

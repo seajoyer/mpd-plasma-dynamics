@@ -35,11 +35,13 @@ private:
     FaceBC bc_m_lo_;   ///< r = inner face (may have multiple segments)
     FaceBC bc_m_hi_;   ///< r = outer face
 
-    // ---- MPI scratch buffer -----------------------------------------------
+    // ---- MPI scratch buffer + in-flight exchange handle -------------------
     std::vector<double> col_batch_buf_;
+    MPIManager::GhostExchangeHandle ghost_handle_;
 
     // ---- sub-steps ----
-    void ExchangeAllGhosts();
-    void ComputeCentralUpdate();
+    void PostGhostExchange();
+    void FinishGhostExchange();
+    void ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi);
     void UpdateCentralPhysical();
 };

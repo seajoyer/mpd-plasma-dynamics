@@ -75,11 +75,30 @@ public:
                          double* col_rl, double* col_rr) const;
 
     /// Exchange ghost cells for N arrays in a single non-blocking round.
-    ///
-    /// @param arrs      array of N double** pointers
-    /// @param n         number of arrays (typically 18)
-    /// @param col_bufs  scratch space — resized automatically each call.
-    ///                  Reused across calls to avoid repeated allocation.
+    /// Equivalent to PostGhostsBatch() followed immediately by
+    /// WaitAndUnpackGhostsBatch().  Kept for code paths that don't overlap
+    /// communication with computation.
     void ExchangeGhostsBatch(double** const* arrs, int n,
                                std::vector<double>& col_bufs) const;
+
+    /// Opaque handle for in-flight ghost exchanges.
+    /// Created by PostGhostsBatch; consumed by WaitAndUnpackGhostsBatch.
+    struct GhostExchangeHandle {
+        MPI_Request reqs[8];
+        int         nreq{0};
+    };
+
+    /// Pack sends and post all Isend/Irecv for an N-array ghost exchange.
+    /// `col_bufs` and `h` MUST remain alive (and untouched) until the matching
+    /// WaitAndUnpackGhostsBatch() call.  `arrs` does not need to remain valid
+    /// between the two calls (the buffer indices are baked in at Post time
+    /// and the array pointers are only re-read at Wait time for unpacking).
+    void PostGhostsBatch(double** const* arrs, int n,
+                          std::vector<double>& col_bufs,
+                          GhostExchangeHandle& h) const;
+
+    /// MPI_Waitall + unpack received rows/columns back into the arrays.
+    void WaitAndUnpackGhostsBatch(double** const* arrs, int n,
+                                    std::vector<double>& col_bufs,
+                                    GhostExchangeHandle& h) const;
 };

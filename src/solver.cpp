@@ -1,5 +1,6 @@
 #include "solver.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -17,28 +18,69 @@ Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
 {}
 
 // ============================================================
-// Public entry point
+// Public entry point — with comm/compute overlap
 // ============================================================
 
 void Solver::Advance(double dt) {
     current_dt_ = dt;
 
-    ExchangeAllGhosts();
-    ComputeCentralUpdate();
+    const int local_L = mpi_.local_L;
+    const int local_M = mpi_.local_M;
+    const int m_lo_bc = mpi_.IsMLoBoundary() ? 2 : 1;
+    const int m_hi_bc = mpi_.IsMHiBoundary() ? local_M - 1 : local_M;
+
+    // Deep-interior bounds — cells whose 5-point stencil cannot reach any
+    // ghost ring (l=0, l=local_L+1, m=0, m=local_M+1).  These can be updated
+    // while the ghost exchange is still in flight.
+    const int l_lo_inner = 2;
+    const int l_hi_inner = local_L - 1;
+    const int m_lo_inner = std::max(m_lo_bc, 2);
+    const int m_hi_inner = std::min(m_hi_bc, local_M - 1);
+
+    // ---- 1. Post non-blocking ghost exchanges -----------------------------
+    PostGhostExchange();
+
+    // ---- 2. LF update on the deep interior (no ghost dependencies) --------
+    if (l_lo_inner <= l_hi_inner && m_lo_inner <= m_hi_inner) {
+        ComputeCentralUpdateRange(l_lo_inner, l_hi_inner, m_lo_inner, m_hi_inner);
+    }
+
+    // ---- 3. Wait for exchange + reconstruct ghost-ring physical fields ----
+    FinishGhostExchange();
+
+    // ---- 4. LF update on the boundary strips that depend on ghost rings ---
+    // L-direction strips (full m range).  On L boundary ranks the LF result
+    // at l=1 / l=local_L is overwritten by the corresponding L BC, so we
+    // don't need to special-case those ranks.
+    if (m_lo_bc <= m_hi_bc) {
+        if (local_L >= 1) {
+            ComputeCentralUpdateRange(1, 1, m_lo_bc, m_hi_bc);
+        }
+        if (local_L >= 2) {
+            ComputeCentralUpdateRange(local_L, local_L, m_lo_bc, m_hi_bc);
+        }
+    }
+    // M-direction strips on inner-l rows (corners already handled by L strips).
+    // On M boundary ranks these strips are out of the LF range and skipped.
+    if (l_lo_inner <= l_hi_inner) {
+        if (!mpi_.IsMLoBoundary()) {
+            ComputeCentralUpdateRange(l_lo_inner, l_hi_inner, 1, 1);
+        }
+        if (!mpi_.IsMHiBoundary()) {
+            ComputeCentralUpdateRange(l_lo_inner, l_hi_inner, local_M, local_M);
+        }
+    }
+
+    // ---- 5. Reconstruct physical fields for entire interior ---------------
     UpdateCentralPhysical();
 
+    // ---- 6. Boundary conditions -------------------------------------------
     bc_l_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_l_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
 
     // Reconstruct only the boundary strips that the FaceBCs just wrote u for.
-    // The interior was already done by UpdateCentralPhysical.  On
-    // non-M-boundary ranks the m_lo/m_hi strips are no-ops because
-    // UpdateCentralPhysical already covered m=1 and m=local_M there.
-    const int local_L = mpi_.local_L;
-    const int local_M = mpi_.local_M;
-
     if (mpi_.IsLLoBoundary()) {
         f_.UpdatePhysicalFromU(grid_, cfg_, 1, 1, 1, local_M);
     }
@@ -52,6 +94,7 @@ void Solver::Advance(double dt) {
         f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
     }
 
+    // ---- 7. Advance u0 ← u (pointer swap, O(1)) ---------------------------
     std::swap(f_.u_1, f_.u0_1);
     std::swap(f_.u_2, f_.u0_2);
     std::swap(f_.u_3, f_.u0_3);
@@ -63,17 +106,23 @@ void Solver::Advance(double dt) {
 }
 
 // ============================================================
-// Ghost-cell exchange (all 4 directions, all 18 arrays, one phase)
+// Ghost-cell exchange — split into post + finish
 // ============================================================
 
-void Solver::ExchangeAllGhosts() {
-    // Only conservative arrays are shipped.  Physical fields are derived
-    // locally from the just-received u0_* on the four ghost rings below.
+void Solver::PostGhostExchange() {
     double** arrs[8] = {
         f_.u0_1.Raw(), f_.u0_2.Raw(), f_.u0_3.Raw(), f_.u0_4.Raw(),
         f_.u0_5.Raw(), f_.u0_6.Raw(), f_.u0_7.Raw(), f_.u0_8.Raw()
     };
-    mpi_.ExchangeGhostsBatch(arrs, 8, col_batch_buf_);
+    mpi_.PostGhostsBatch(arrs, 8, col_batch_buf_, ghost_handle_);
+}
+
+void Solver::FinishGhostExchange() {
+    double** arrs[8] = {
+        f_.u0_1.Raw(), f_.u0_2.Raw(), f_.u0_3.Raw(), f_.u0_4.Raw(),
+        f_.u0_5.Raw(), f_.u0_6.Raw(), f_.u0_7.Raw(), f_.u0_8.Raw()
+    };
+    mpi_.WaitAndUnpackGhostsBatch(arrs, 8, col_batch_buf_, ghost_handle_);
 
     // Reconstruct physical fields in the four ghost rings.  Skip rings on
     // physical-domain boundaries (no neighbour, no fresh data to derive from).
@@ -95,22 +144,15 @@ void Solver::ExchangeAllGhosts() {
 }
 
 // ============================================================
-// Lax–Friedrichs central update (interior cells)
+// Lax–Friedrichs central update — over an arbitrary (l, m) range
 // ============================================================
 
-void Solver::ComputeCentralUpdate() {
-    const int    local_L = mpi_.local_L;
-    const int    local_M = mpi_.local_M;
-    const double dt      = current_dt_;
-    const double dz      = cfg_.dz;
+void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
+    if (l_lo > l_hi || m_lo > m_hi) return;
 
-    // On M boundary ranks the first/last interior row of the M direction
-    // belongs to a BC; skip it in the central update so the BC result is
-    // not overwritten.
-    const int m_lo = mpi_.IsMLoBoundary() ? 2 : 1;
-    const int m_hi = mpi_.IsMHiBoundary() ? local_M - 1 : local_M;
+    const double dt = current_dt_;
+    const double dz = cfg_.dz;
 
-    // Raw double** pointers — one dereference per row access inside the loop.
     auto** u0_1 = f_.u0_1.Raw();  auto** u0_2 = f_.u0_2.Raw();
     auto** u0_3 = f_.u0_3.Raw();  auto** u0_4 = f_.u0_4.Raw();
     auto** u0_5 = f_.u0_5.Raw();  auto** u0_6 = f_.u0_6.Raw();
@@ -130,13 +172,13 @@ void Solver::ComputeCentralUpdate() {
     const double* dr = grid_.dr.data();
     const double dt_inv_2dz = dt / (2.0 * dz);
 
-    // Parallelise on l
-    #pragma omp parallel for
-    for (int l = 1; l <= local_L; ++l) {
+    constexpr int kOmpCellThreshold = 2048;
+    const int total_cells = (l_hi - l_lo + 1) * (m_hi - m_lo + 1);
+
+    #pragma omp parallel for if(total_cells >= kOmpCellThreshold)
+    for (int l = l_lo; l <= l_hi; ++l) {
         const double dt_inv_2drl = dt / (2.0 * dr[l]);
 
-        // ---- Hoist row pointers for all three l-rows used in the stencil ----
-        // Conservative state (three rows each: l-1, l, l+1)
         const double* u0_1_lm = u0_1[l-1]; const double* u0_1_l = u0_1[l]; const double* u0_1_lp = u0_1[l+1];
         const double* u0_2_lm = u0_2[l-1]; const double* u0_2_l = u0_2[l]; const double* u0_2_lp = u0_2[l+1];
         const double* u0_3_lm = u0_3[l-1]; const double* u0_3_l = u0_3[l]; const double* u0_3_lp = u0_3[l+1];
@@ -146,13 +188,11 @@ void Solver::ComputeCentralUpdate() {
         const double* u0_7_lm = u0_7[l-1]; const double* u0_7_l = u0_7[l]; const double* u0_7_lp = u0_7[l+1];
         const double* u0_8_lm = u0_8[l-1]; const double* u0_8_l = u0_8[l]; const double* u0_8_lp = u0_8[l+1];
 
-        // Output rows
         double* u_1_l  = u_1[l];  double* u_2_l  = u_2[l];
         double* u_3_l  = u_3[l];  double* u_4_l  = u_4[l];
         double* u_5_l  = u_5[l];  double* u_6_l  = u_6[l];
         double* u_7_l  = u_7[l];  double* u_8_l  = u_8[l];
 
-        // Physical fields (three rows where needed)
         const double* vz_lm  = v_z[l-1];   const double* vz_l  = v_z[l];   const double* vz_lp  = v_z[l+1];
         const double* vr_lm  = v_r[l-1];                                   const double* vr_lp  = v_r[l+1];
         const double* vphi_lm= v_phi[l-1];                                 const double* vphi_lp= v_phi[l+1];
@@ -160,11 +200,11 @@ void Solver::ComputeCentralUpdate() {
         const double* Hr_lm  = H_r[l-1];                                   const double* Hr_lp  = H_r[l+1];
         const double* Hphi_lm= H_phi[l-1]; const double* Hphi_l= H_phi[l]; const double* Hphi_lp= H_phi[l+1];
         const double* P_lm   = P[l-1];                                     const double* P_lp   = P[l+1];
-        const double* p_l    = p[l];                                       
+        const double* p_l    = p[l];
         const double* r_lm   = r[l-1];     const double* r_l   = r[l];     const double* r_lp   = r[l+1];
         const double* rho_l  = rho[l];
         const double* vphi_l = v_phi[l];
-        const double* Hphi_l2= H_phi[l]; // alias for same row, separate name for clarity
+        const double* Hphi_l2= H_phi[l];
 
         for (int m = m_lo; m <= m_hi; ++m) {
             u_1_l[m] =

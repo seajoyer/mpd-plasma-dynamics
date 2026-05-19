@@ -69,8 +69,10 @@ void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
                                       int l_lo, int l_hi,
                                       int m_lo, int m_hi) {
     const double gamma = cfg.gamma;
+    constexpr int kOmpCellThreshold = 2048;
+    const int total_cells = (l_hi - l_lo + 1) * (m_hi - m_lo + 1);
 
-    #pragma omp parallel for
+    #pragma omp parallel for if(total_cells >= kOmpCellThreshold)
     for (int l = l_lo; l <= l_hi; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
             const double inv_r  = grid.inv_r[l][m];
@@ -98,8 +100,10 @@ void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
                                   int l_lo, int l_hi,
                                   int m_lo, int m_hi) {
     const double gamma = cfg.gamma;
+    constexpr int kOmpCellThreshold = 2048;
+    const int total_cells = (l_hi - l_lo + 1) * (m_hi - m_lo + 1);
 
-    #pragma omp parallel for
+    #pragma omp parallel for if(total_cells >= kOmpCellThreshold)
     for (int l = l_lo; l <= l_hi; ++l) {
         for (int m = m_lo; m <= m_hi; ++m) {
             const double inv_r  = grid.inv_r[l][m];
