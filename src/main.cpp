@@ -216,7 +216,8 @@ auto main(int argc, char* argv[]) -> int {
 
         constexpr int kDtRecomputeStride = 10;
         if (cfg.adaptive_dt && step_count % kDtRecomputeStride == 0) {
-            dt = Diagnostics::ComputeDt(fields, cfg, mpi.local_L, mpi.local_M,
+            dt = Diagnostics::ComputeDt(fields, cfg, grid,
+                                        mpi.local_L, mpi.local_M,
                                         mpi, dt, prev_max_speed);
         }
 
@@ -238,7 +239,8 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (cfg.diagnostics.cfl_check && step_count % 100 == 0) {
-            Diagnostics::CheckCfl(fields, cfg, mpi, mpi.local_L, mpi.local_M, dt,
+            Diagnostics::CheckCfl(fields, cfg, grid,
+                                  mpi, mpi.local_L, mpi.local_M, dt,
                                   step_count);
         }
 
