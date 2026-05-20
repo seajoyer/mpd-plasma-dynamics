@@ -218,71 +218,191 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
 
         #pragma omp simd
         for (int m = m_lo; m <= m_hi; ++m) {
+            // ── L-axis composites at l±1 (single cell, no carry) ───────
+            const double r_lp_m    = r_lp[m];
+            const double r_lm_m    = r_lm[m];
+            const double Hz_lp_m   = Hz_lp[m];
+            const double Hz_lm_m   = Hz_lm[m];
+            const double Hr_lp_m   = Hr_lp[m];
+            const double Hr_lm_m   = Hr_lm[m];
+            const double Hphi_lp_m = Hphi_lp[m];
+            const double Hphi_lm_m = Hphi_lm[m];
+            const double vz_lp_m   = vz_lp[m];
+            const double vz_lm_m   = vz_lm[m];
+            const double vr_lp_m   = vr_lp[m];
+            const double vr_lm_m   = vr_lm[m];
+            const double vphi_lp_m = vphi_lp[m];
+            const double vphi_lm_m = vphi_lm[m];
+            const double P_lp_m    = P_lp[m];
+            const double P_lm_m    = P_lm[m];
+
+            // r·Hz at l±1  (reused 4× per cell: u_2, u_3, u_4, u_8 z-fluxes)
+            const double rHz_lp = r_lp_m * Hz_lp_m;
+            const double rHz_lm = r_lm_m * Hz_lm_m;
+
+            // (Hz² − P)·r at l±1  (u_2)
+            const double Hz2mP_r_lp = rHz_lp * Hz_lp_m - P_lp_m * r_lp_m;
+            const double Hz2mP_r_lm = rHz_lm * Hz_lm_m - P_lm_m * r_lm_m;
+
+            // Hz·Hr·r at l±1  (u_3 z-flux)
+            const double HzHr_r_lp = rHz_lp * Hr_lp_m;
+            const double HzHr_r_lm = rHz_lm * Hr_lm_m;
+
+            // Hphi·Hz·r at l±1  (u_4 z-flux)
+            const double HphiHz_r_lp = rHz_lp * Hphi_lp_m;
+            const double HphiHz_r_lm = rHz_lm * Hphi_lm_m;
+
+            // Hz·vr·r at l±1  (u_8 z-flux)
+            const double Hzvr_r_lp = rHz_lp * vr_lp_m;
+            const double Hzvr_r_lm = rHz_lm * vr_lm_m;
+
+            // vz·r at l±1  (u_5 energy)
+            const double vz_r_lp = vz_lp_m * r_lp_m;
+            const double vz_r_lm = vz_lm_m * r_lm_m;
+
+            // Hz·vphi at l±1  (u_6 z-flux, no r factor)
+            const double Hzvphi_lp = Hz_lp_m * vphi_lp_m;
+            const double Hzvphi_lm = Hz_lm_m * vphi_lm_m;
+
+            // Advective u0_k·vz at l±1  (k = 1..6, 8; u_7 has no z-flux)
+            const double u0vz_1_lp = u0_1_lp[m] * vz_lp_m;
+            const double u0vz_1_lm = u0_1_lm[m] * vz_lm_m;
+            const double u0vz_2_lp = u0_2_lp[m] * vz_lp_m;
+            const double u0vz_2_lm = u0_2_lm[m] * vz_lm_m;
+            const double u0vz_3_lp = u0_3_lp[m] * vz_lp_m;
+            const double u0vz_3_lm = u0_3_lm[m] * vz_lm_m;
+            const double u0vz_4_lp = u0_4_lp[m] * vz_lp_m;
+            const double u0vz_4_lm = u0_4_lm[m] * vz_lm_m;
+            const double u0vz_5_lp = u0_5_lp[m] * vz_lp_m;
+            const double u0vz_5_lm = u0_5_lm[m] * vz_lm_m;
+            const double u0vz_6_lp = u0_6_lp[m] * vz_lp_m;
+            const double u0vz_6_lm = u0_6_lm[m] * vz_lm_m;
+            const double u0vz_8_lp = u0_8_lp[m] * vz_lp_m;
+            const double u0vz_8_lm = u0_8_lm[m] * vz_lm_m;
+
+            // ── M-axis composites at m±1 (single cell, no carry) ───────
+            const double r_mp    = r_l[m+1];
+            const double r_mn    = r_l[m-1];
+            const double Hr_mp   = Hr_l[m+1];
+            const double Hr_mn   = Hr_l[m-1];
+            const double Hz_mp   = Hz_l[m+1];
+            const double Hz_mn   = Hz_l[m-1];
+            const double Hphi_mp = Hphi_l[m+1];
+            const double Hphi_mn = Hphi_l[m-1];
+            const double vz_mp   = vz_l[m+1];
+            const double vz_mn   = vz_l[m-1];
+            const double vr_mp   = vr_l[m+1];
+            const double vr_mn   = vr_l[m-1];
+            const double vphi_mp = vphi_l[m+1];
+            const double vphi_mn = vphi_l[m-1];
+            const double P_mp    = P_l[m+1];
+            const double P_mn    = P_l[m-1];
+
+            // r·Hr at m±1  (reused 4× per cell: u_2, u_3, u_4, u_7 r-fluxes)
+            const double rHr_mp = r_mp * Hr_mp;
+            const double rHr_mn = r_mn * Hr_mn;
+
+            // (Hr² − P)·r at m±1  (u_3 r-flux)
+            const double Hr2mP_r_mp = rHr_mp * Hr_mp - P_mp * r_mp;
+            const double Hr2mP_r_mn = rHr_mn * Hr_mn - P_mn * r_mn;
+
+            // Hz·Hr·r at m±1  (u_2 r-flux)
+            const double HzHr_r_mp = rHr_mp * Hz_mp;
+            const double HzHr_r_mn = rHr_mn * Hz_mn;
+
+            // Hphi·Hr·r at m±1  (u_4 r-flux)
+            const double HphiHr_r_mp = rHr_mp * Hphi_mp;
+            const double HphiHr_r_mn = rHr_mn * Hphi_mn;
+
+            // Hr·vz·r at m±1  (u_7 r-flux)
+            const double Hrvz_r_mp = rHr_mp * vz_mp;
+            const double Hrvz_r_mn = rHr_mn * vz_mn;
+
+            // vr·r at m±1  (u_5 energy)
+            const double vr_r_mp = vr_mp * r_mp;
+            const double vr_r_mn = vr_mn * r_mn;
+
+            // Hr·vphi at m±1  (u_6 r-flux, no r factor)
+            const double Hrvphi_mp = Hr_mp * vphi_mp;
+            const double Hrvphi_mn = Hr_mn * vphi_mn;
+
+            // Advective u0_k·vr at m±1  (k = 1..8)
+            const double u0vr_1_mp = u0_1_l[m+1] * vr_mp;
+            const double u0vr_1_mn = u0_1_l[m-1] * vr_mn;
+            const double u0vr_2_mp = u0_2_l[m+1] * vr_mp;
+            const double u0vr_2_mn = u0_2_l[m-1] * vr_mn;
+            const double u0vr_3_mp = u0_3_l[m+1] * vr_mp;
+            const double u0vr_3_mn = u0_3_l[m-1] * vr_mn;
+            const double u0vr_4_mp = u0_4_l[m+1] * vr_mp;
+            const double u0vr_4_mn = u0_4_l[m-1] * vr_mn;
+            const double u0vr_5_mp = u0_5_l[m+1] * vr_mp;
+            const double u0vr_5_mn = u0_5_l[m-1] * vr_mn;
+            const double u0vr_6_mp = u0_6_l[m+1] * vr_mp;
+            const double u0vr_6_mn = u0_6_l[m-1] * vr_mn;
+            const double u0vr_7_mp = u0_7_l[m+1] * vr_mp;
+            const double u0vr_7_mn = u0_7_l[m-1] * vr_mn;
+            const double u0vr_8_mp = u0_8_l[m+1] * vr_mp;
+            const double u0vr_8_mn = u0_8_l[m-1] * vr_mn;
+
             // ── u_1 : ρ·r ────────────────────────────────────────────────
             u_1_l[m] =
                 0.25 * (u0_1_lp[m] + u0_1_lm[m] + u0_1_l[m+1] + u0_1_l[m-1])
-                - dt_inv_2dz  * (u0_1_lp[m]*vz_lp[m]   - u0_1_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_1_l[m+1]*vr_l[m+1] - u0_1_l[m-1]*vr_l[m-1]);
+                - dt_inv_2dz  * (u0vz_1_lp - u0vz_1_lm)
+                - dt_inv_2drl * (u0vr_1_mp - u0vr_1_mn);
 
             // ── u_2 : ρ·v_z·r  (z-momentum) ─────────────────────────────
             u_2_l[m] =
                 0.25 * (u0_2_lp[m] + u0_2_lm[m] + u0_2_l[m+1] + u0_2_l[m-1])
-                + dt_inv_2dz  * ( (Hz_lp[m]*Hz_lp[m] - P_lp[m])*r_lp[m]
-                                 -(Hz_lm[m]*Hz_lm[m] - P_lm[m])*r_lm[m])
-                + dt_inv_2drl * ( Hz_l[m+1]*Hr_l[m+1]*r_l[m+1]
-                                 -Hz_l[m-1]*Hr_l[m-1]*r_l[m-1])
-                - dt_inv_2dz  * (u0_2_lp[m]*vz_lp[m]   - u0_2_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_2_l[m+1]*vr_l[m+1] - u0_2_l[m-1]*vr_l[m-1]);
+                + dt_inv_2dz  * (Hz2mP_r_lp - Hz2mP_r_lm)
+                + dt_inv_2drl * (HzHr_r_mp  - HzHr_r_mn)
+                - dt_inv_2dz  * (u0vz_2_lp  - u0vz_2_lm)
+                - dt_inv_2drl * (u0vr_2_mp  - u0vr_2_mn);
 
             // ── u_3 : ρ·v_r·r  (r-momentum) ─────────────────────────────
             u_3_l[m] =
                 0.25 * (u0_3_lp[m] + u0_3_lm[m] + u0_3_l[m+1] + u0_3_l[m-1])
                 + dt * (rho_l[m]*vphi_l[m]*vphi_l[m] + P_l[m] - Hphi_l[m]*Hphi_l[m])
-                + dt_inv_2dz  * ( Hz_lp[m]*Hr_lp[m]*r_lp[m]
-                                 -Hz_lm[m]*Hr_lm[m]*r_lm[m])
-                + dt_inv_2drl * ( (Hr_l[m+1]*Hr_l[m+1] - P_l[m+1])*r_l[m+1]
-                                 -(Hr_l[m-1]*Hr_l[m-1] - P_l[m-1])*r_l[m-1])
-                - dt_inv_2dz  * (u0_3_lp[m]*vz_lp[m]   - u0_3_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_3_l[m+1]*vr_l[m+1] - u0_3_l[m-1]*vr_l[m-1]);
+                + dt_inv_2dz  * (HzHr_r_lp  - HzHr_r_lm)
+                + dt_inv_2drl * (Hr2mP_r_mp - Hr2mP_r_mn)
+                - dt_inv_2dz  * (u0vz_3_lp  - u0vz_3_lm)
+                - dt_inv_2drl * (u0vr_3_mp  - u0vr_3_mn);
 
             // ── u_4 : ρ·v_φ·r  (φ-momentum) ─────────────────────────────
             u_4_l[m] =
                 0.25 * (u0_4_lp[m] + u0_4_lm[m] + u0_4_l[m+1] + u0_4_l[m-1])
                 + dt * (-rho_l[m]*vr_l[m]*vphi_l[m] + Hphi_l[m]*Hr_l[m])
-                + dt_inv_2dz  * ( Hphi_lp[m]*Hz_lp[m]*r_lp[m]
-                                 -Hphi_lm[m]*Hz_lm[m]*r_lm[m])
-                + dt_inv_2drl * ( Hphi_l[m+1]*Hr_l[m+1]*r_l[m+1]
-                                 -Hphi_l[m-1]*Hr_l[m-1]*r_l[m-1])
-                - dt_inv_2dz  * (u0_4_lp[m]*vz_lp[m]   - u0_4_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_4_l[m+1]*vr_l[m+1] - u0_4_l[m-1]*vr_l[m-1]);
+                + dt_inv_2dz  * (HphiHz_r_lp - HphiHz_r_lm)
+                + dt_inv_2drl * (HphiHr_r_mp - HphiHr_r_mn)
+                - dt_inv_2dz  * (u0vz_4_lp   - u0vz_4_lm)
+                - dt_inv_2drl * (u0vr_4_mp   - u0vr_4_mn);
 
             // ── u_5 : ρ·e·r  (energy) ────────────────────────────────────
             u_5_l[m] =
                 0.25 * (u0_5_lp[m] + u0_5_lm[m] + u0_5_l[m+1] + u0_5_l[m-1])
-                - p_l[m] * (dt_inv_2dz  * (vz_lp[m]*r_lp[m]   - vz_lm[m]*r_lm[m])
-                           + dt_inv_2drl * (vr_l[m+1]*r_l[m+1] - vr_l[m-1]*r_l[m-1]))
-                - dt_inv_2dz  * (u0_5_lp[m]*vz_lp[m]   - u0_5_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_5_l[m+1]*vr_l[m+1] - u0_5_l[m-1]*vr_l[m-1]);
+                - p_l[m] * (dt_inv_2dz  * (vz_r_lp - vz_r_lm)
+                          + dt_inv_2drl * (vr_r_mp - vr_r_mn))
+                - dt_inv_2dz  * (u0vz_5_lp - u0vz_5_lm)
+                - dt_inv_2drl * (u0vr_5_mp - u0vr_5_mn);
 
             // ── u_6 : H_φ ───────────────────────────────────────────────
             u_6_l[m] =
                 0.25 * (u0_6_lp[m] + u0_6_lm[m] + u0_6_l[m+1] + u0_6_l[m-1])
-                + dt_inv_2dz  * (Hz_lp[m]*vphi_lp[m]   - Hz_lm[m]*vphi_lm[m])
-                + dt_inv_2drl * (Hr_l[m+1]*vphi_l[m+1] - Hr_l[m-1]*vphi_l[m-1])
-                - dt_inv_2dz  * (u0_6_lp[m]*vz_lp[m]   - u0_6_lm[m]*vz_lm[m])
-                - dt_inv_2drl * (u0_6_l[m+1]*vr_l[m+1] - u0_6_l[m-1]*vr_l[m-1]);
+                + dt_inv_2dz  * (Hzvphi_lp - Hzvphi_lm)
+                + dt_inv_2drl * (Hrvphi_mp - Hrvphi_mn)
+                - dt_inv_2dz  * (u0vz_6_lp - u0vz_6_lm)
+                - dt_inv_2drl * (u0vr_6_mp - u0vr_6_mn);
 
             // ── u_7 : H_z·r ─────────────────────────────────────────────
             u_7_l[m] =
                 0.25 * (u0_7_lp[m] + u0_7_lm[m] + u0_7_l[m+1] + u0_7_l[m-1])
-                + dt_inv_2drl * (Hr_l[m+1]*vz_l[m+1]*r_l[m+1] - Hr_l[m-1]*vz_l[m-1]*r_l[m-1])
-                - dt_inv_2drl * (u0_7_l[m+1]*vr_l[m+1] - u0_7_l[m-1]*vr_l[m-1]);
+                + dt_inv_2drl * (Hrvz_r_mp - Hrvz_r_mn)
+                - dt_inv_2drl * (u0vr_7_mp - u0vr_7_mn);
 
             // ── u_8 : H_r·r ─────────────────────────────────────────────
             u_8_l[m] =
                 0.25 * (u0_8_lp[m] + u0_8_lm[m] + u0_8_l[m+1] + u0_8_l[m-1])
-                + dt_inv_2dz * (Hz_lp[m]*vr_lp[m]*r_lp[m] - Hz_lm[m]*vr_lm[m]*r_lm[m])
-                - dt_inv_2dz * (u0_8_lp[m]*vz_lp[m] - u0_8_lm[m]*vz_lm[m]);
+                + dt_inv_2dz * (Hzvr_r_lp - Hzvr_r_lm)
+                - dt_inv_2dz * (u0vz_8_lp - u0vz_8_lm);
         }
     }
 }
