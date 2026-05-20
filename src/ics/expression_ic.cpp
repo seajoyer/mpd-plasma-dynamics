@@ -284,11 +284,10 @@ ExpressionIC::~ExpressionIC() = default;
 void ExpressionIC::Apply(Fields& f, const Grid& grid,
                           const SimConfig& cfg, int l_start) const
 {
-    const double gamma = cfg.gamma;
     const double dz    = cfg.dz;
 
     // Bind physics constants into the shared symbol table once.
-    impl_->SetPhysics(gamma, cfg.beta, cfg.H_z0, grid.r_0);
+    impl_->SetPhysics(cfg.gamma, cfg.beta, cfg.H_z0, grid.r_0);
 
     // Expression evaluation uses shared mutable state in impl_.
     // Running this loop with OpenMP would require per-thread symbol tables,
@@ -310,13 +309,6 @@ void ExpressionIC::Apply(Fields& f, const Grid& grid,
             f.H_r  [l][m] = impl_->H_r_v;
             f.H_phi[l][m] = impl_->H_phi_v;
             f.e    [l][m] = impl_->e_v;
-
-            // Derived scalars — must follow all primary assignments.
-            f.p[l][m] = (gamma - 1.0) * f.rho[l][m] * f.e[l][m];
-            f.P[l][m] = f.p[l][m]
-                      + 0.5 * (f.H_z  [l][m] * f.H_z  [l][m]
-                               + f.H_r  [l][m] * f.H_r  [l][m]
-                               + f.H_phi[l][m] * f.H_phi[l][m]);
         }
     }
 }

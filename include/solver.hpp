@@ -52,5 +52,4 @@ private:
     void PostGhostExchange();
     void FinishGhostExchange();
     void ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi);
-    void UpdateCentralPhysical();
 };

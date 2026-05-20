@@ -519,11 +519,8 @@ void PerFieldBC::Apply(BCContext& ctx) const {
 // All four helpers read time-n physical state by deriving it from the
 // conservative arrays f.u0_*, which carry the unmodified time-n values
 // throughout Solver::Advance() (the u_*/u0_* swap happens only at the very
-// end of the step).  This makes the helpers immune to call-order issues:
-// they would produce identical results whether invoked before or after
-// Solver::UpdateCentralPhysical() rewrites f.rho / f.v_* / f.H_* / f.p /
-// f.P to time n+1 in the deep interior.
-//
+// end of the step).
+// 
 // Time-n physical quantities from u0_*:
 //
 //   rho   = u0_1 / r

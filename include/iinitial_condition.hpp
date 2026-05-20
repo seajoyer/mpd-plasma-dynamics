@@ -9,7 +9,7 @@ struct SimConfig;
 /// Abstract interface for an initial-condition implementation.
 ///
 /// An IInitialCondition sets all physical fields (rho, v_z, v_r, v_phi,
-/// e, p, P, H_z, H_r, H_phi) for the interior cells owned by this rank.
+/// e, H_z, H_r, H_phi) for the interior cells owned by this rank.
 /// Ghost cells are left at their default-constructed zero values; they will
 /// be populated by the first ghost-exchange in Solver::Advance().
 ///
@@ -24,10 +24,7 @@ public:
 
     /// Initialise all physical fields for interior cells [1..local_L][1..local_M].
     ///
-    /// Derived fields (p, P) must also be filled so the solver has a consistent
-    /// state before the first ghost exchange and central update.
-    ///
-    /// @param fields   Field arrays to write (physical vars: rho, v_*, H_*, e, p, P).
+    /// @param fields   Field arrays to write (physical vars: rho, v_*, H_*, e).
     /// @param grid     Local mesh (r, r_z, dr, r_0 are all available).
     /// @param cfg      Global simulation parameters (gamma, beta, H_z0, dz, ...).
     /// @param l_start  Global l-index of the first owned interior cell (local l = 1).

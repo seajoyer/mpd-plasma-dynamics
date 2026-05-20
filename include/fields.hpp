@@ -33,7 +33,7 @@ public:
 
     // ---- physical variables ----
     Array2D rho, v_z, v_r, v_phi;
-    Array2D e, p, P;
+    Array2D e;
     Array2D H_z, H_r, H_phi;
 
     // ---- previous-step snapshots for convergence checking ----
@@ -51,9 +51,8 @@ public:
     /// by delegating to ic.Apply().  Ghost cells are left at zero; they are
     /// filled by the first ghost exchange inside Solver::Advance().
     ///
-    /// The IC sets all physical fields (rho, v_*, H_*, e) and the derived
-    /// scalars (p, P) so the solver has a fully consistent state before the
-    /// first time step.
+    /// The IC sets all physical fields (rho, v_*, H_*, e) so the solver
+    /// has a fully consistent state before the first time step.
     ///
     /// @param ic       IC implementation chosen via InitialConditionRegistry.
     /// @param cfg      Global simulation parameters forwarded to the IC.
@@ -75,9 +74,7 @@ public:
                                  int l_lo, int l_hi, int m_lo, int m_hi);
 
     /// Same as UpdatePhysicalFromU but reads from u0_* (the conservative
-    /// state at the *beginning* of the current step).  Used to reconstruct
-    /// physical fields in the ghost layer after the per-step exchange of
-    /// conservative arrays, without paying to ship physical fields too.
+    /// state at the beginning of the current step).
     void UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
                               int l_lo, int l_hi, int m_lo, int m_hi);
 };

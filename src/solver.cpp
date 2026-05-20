@@ -57,7 +57,10 @@ void Solver::Advance(double dt) {
         ComputeCentralUpdateRange(l_lo_inner, l_hi_inner, m_lo_inner, m_hi_inner);
     }
 
-    // ---- 3. Wait for exchange + reconstruct ghost-ring physical fields ----
+    // ---- 3. Wait for exchange of u0_* ghosts ------------------------------
+    // Physical fields in ghost rings are NOT reconstructed here: the LF kernel
+    // derives the stencil primitives it needs straight from u0_*/r, which are
+    // valid in ghost cells immediately after the exchange completes.
     FinishGhostExchange();
 
     // ---- 4. LF update on the boundary strips that depend on ghost rings ---
@@ -83,16 +86,16 @@ void Solver::Advance(double dt) {
         }
     }
 
-    // ---- 5. Reconstruct physical fields for entire interior ---------------
-    UpdateCentralPhysical();
-
-    // ---- 6. Boundary conditions -------------------------------------------
+    // ---- 5. Boundary conditions -------------------------------------------
     bc_l_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_l_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
 
     // Reconstruct only the boundary strips that the FaceBCs just wrote u for.
+    // FaceBCs write u_* via RebuildUFromPhysical and/or the AxisLF helpers;
+    // the physical state at those cells must be brought back into sync with
+    // those new u_* values before the next step.
     if (mpi_.IsLLoBoundary()) {
         f_.UpdatePhysicalFromU(grid_, cfg_, 1, 1, 1, local_M);
     }
@@ -106,7 +109,7 @@ void Solver::Advance(double dt) {
         f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
     }
 
-    // ---- 7. Advance u0 ← u (pointer swap, O(1)) ---------------------------
+    // ---- 6. Advance u0 ← u (pointer swap, O(1)) ---------------------------
     std::swap(f_.u_1, f_.u0_1);
     std::swap(f_.u_2, f_.u0_2);
     std::swap(f_.u_3, f_.u0_3);
@@ -135,28 +138,10 @@ void Solver::FinishGhostExchange() {
         f_.u0_5.Raw(), f_.u0_6.Raw(), f_.u0_7.Raw(), f_.u0_8.Raw()
     };
     mpi_.WaitAndUnpackGhostsBatch(arrs, 8, col_batch_buf_, ghost_handle_);
-
-    // Reconstruct physical fields in the four ghost rings.  Skip rings on
-    // physical-domain boundaries (no neighbour, no fresh data to derive from).
-    const int local_L = mpi_.local_L;
-    const int local_M = mpi_.local_M;
-
-    if (mpi_.nbr_l_lo != MPI_PROC_NULL) {
-        f_.UpdatePhysicalFromU0(grid_, cfg_, 0, 0, 1, local_M);
-    }
-    if (mpi_.nbr_l_hi != MPI_PROC_NULL) {
-        f_.UpdatePhysicalFromU0(grid_, cfg_, local_L + 1, local_L + 1, 1, local_M);
-    }
-    if (mpi_.nbr_m_lo != MPI_PROC_NULL) {
-        f_.UpdatePhysicalFromU0(grid_, cfg_, 1, local_L, 0, 0);
-    }
-    if (mpi_.nbr_m_hi != MPI_PROC_NULL) {
-        f_.UpdatePhysicalFromU0(grid_, cfg_, 1, local_L, local_M + 1, local_M + 1);
-    }
 }
 
 // ============================================================
-// Lax–Friedrichs central update
+// Lax–Friedrichs central update — fused with physical reconstruction
 // ============================================================
 
 void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
@@ -164,6 +149,7 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
 
     const double dt = current_dt_;
     const double dz = cfg_.dz;
+    const double gamma_m1 = cfg_.gamma - 1.0;
 
     auto** u0_1 = f_.u0_1.Raw();  auto** u0_2 = f_.u0_2.Raw();
     auto** u0_3 = f_.u0_3.Raw();  auto** u0_4 = f_.u0_4.Raw();
@@ -177,11 +163,13 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
 
     auto** rho   = f_.rho.Raw();   auto** v_z  = f_.v_z.Raw();
     auto** v_r   = f_.v_r.Raw();   auto** v_phi= f_.v_phi.Raw();
-    auto** p     = f_.p.Raw();     auto** P    = f_.P.Raw();
+    auto** e_arr = f_.e.Raw();
     auto** H_z   = f_.H_z.Raw();   auto** H_r  = f_.H_r.Raw();
     auto** H_phi = f_.H_phi.Raw();
-    const double** r  = r_ptr_;   // cached once in ctor
-    const double*  dr = dr_ptr_;  // cached once in ctor
+    const double** r     = r_ptr_;                    // cached once in ctor
+    const double*  dr    = dr_ptr_;                   // cached once in ctor
+    const double** inv_r = grid_.inv_r.Raw();         // precomputed 1/r
+
     const double dt_inv_2dz = dt / (2.0 * dz);
 
     constexpr int kOmpCellThreshold = 2048;
@@ -191,6 +179,7 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
     for (int l = l_lo; l <= l_hi; ++l) {
         const double dt_inv_2drl = dt / (2.0 * dr[l]);
 
+        // ---- row pointers for u0_* at l-1, l, l+1 ----
         const double* u0_1_lm = u0_1[l-1]; const double* u0_1_l = u0_1[l]; const double* u0_1_lp = u0_1[l+1];
         const double* u0_2_lm = u0_2[l-1]; const double* u0_2_l = u0_2[l]; const double* u0_2_lp = u0_2[l+1];
         const double* u0_3_lm = u0_3[l-1]; const double* u0_3_l = u0_3[l]; const double* u0_3_lp = u0_3[l+1];
@@ -200,43 +189,112 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
         const double* u0_7_lm = u0_7[l-1]; const double* u0_7_l = u0_7[l]; const double* u0_7_lp = u0_7[l+1];
         const double* u0_8_lm = u0_8[l-1]; const double* u0_8_l = u0_8[l]; const double* u0_8_lp = u0_8[l+1];
 
+        // ---- row pointers for r and inv_r at l-1, l, l+1 ----
+        const double* r_lm   = r[l-1];     const double* r_l   = r[l];     const double* r_lp   = r[l+1];
+        const double* invr_lm= inv_r[l-1]; const double* invr_l= inv_r[l]; const double* invr_lp= inv_r[l+1];
+
+        // ---- output row pointers (u_* and physical at l) ----
         double* __restrict__ u_1_l = u_1[l];  double* __restrict__ u_2_l = u_2[l];
         double* __restrict__ u_3_l = u_3[l];  double* __restrict__ u_4_l = u_4[l];
         double* __restrict__ u_5_l = u_5[l];  double* __restrict__ u_6_l = u_6[l];
         double* __restrict__ u_7_l = u_7[l];  double* __restrict__ u_8_l = u_8[l];
 
-        const double* vz_lm  = v_z[l-1];   const double* vz_l  = v_z[l];   const double* vz_lp  = v_z[l+1];
-        const double* vr_lm  = v_r[l-1];   const double* vr_l  = v_r[l];   const double* vr_lp  = v_r[l+1];
-        const double* vphi_lm= v_phi[l-1]; const double* vphi_l= v_phi[l]; const double* vphi_lp= v_phi[l+1];
-        const double* Hz_lm  = H_z[l-1];   const double* Hz_l  = H_z[l];   const double* Hz_lp  = H_z[l+1];
-        const double* Hr_lm  = H_r[l-1];   const double* Hr_l  = H_r[l];   const double* Hr_lp  = H_r[l+1];
-        const double* Hphi_lm= H_phi[l-1]; const double* Hphi_l= H_phi[l]; const double* Hphi_lp= H_phi[l+1];
-        const double* P_lm   = P[l-1];     const double* P_l   = P[l];     const double* P_lp   = P[l+1];
-        const double* p_l    = p[l];
-        const double* r_lm   = r[l-1];     const double* r_l   = r[l];     const double* r_lp   = r[l+1];
-        const double* rho_l  = rho[l];
+        double* __restrict__ rho_out   = rho[l];
+        double* __restrict__ vz_out    = v_z[l];
+        double* __restrict__ vr_out    = v_r[l];
+        double* __restrict__ vphi_out  = v_phi[l];
+        double* __restrict__ Hz_out    = H_z[l];
+        double* __restrict__ Hr_out    = H_r[l];
+        double* __restrict__ Hphi_out  = H_phi[l];
+        double* __restrict__ e_out     = e_arr[l];
 
         #pragma omp simd
         for (int m = m_lo; m <= m_hi; ++m) {
-            // ── L-axis composites at l±1 (single cell, no carry) ───────
-            const double r_lp_m    = r_lp[m];
-            const double r_lm_m    = r_lm[m];
-            const double Hz_lp_m   = Hz_lp[m];
-            const double Hz_lm_m   = Hz_lm[m];
-            const double Hr_lp_m   = Hr_lp[m];
-            const double Hr_lm_m   = Hr_lm[m];
-            const double Hphi_lp_m = Hphi_lp[m];
-            const double Hphi_lm_m = Hphi_lm[m];
-            const double vz_lp_m   = vz_lp[m];
-            const double vz_lm_m   = vz_lm[m];
-            const double vr_lp_m   = vr_lp[m];
-            const double vr_lm_m   = vr_lm[m];
-            const double vphi_lp_m = vphi_lp[m];
-            const double vphi_lm_m = vphi_lm[m];
-            const double P_lp_m    = P_lp[m];
-            const double P_lm_m    = P_lm[m];
+            // ============================================================
+            // Step 1a — derive primitives at the four stencil neighbours
+            //            from u0_* and r.  Compiler will CSE the 1/u0_1
+            //            and 1/r values.
+            // ============================================================
 
-            // r·Hz at l±1  (reused 4× per cell: u_2, u_3, u_4, u_8 z-fluxes)
+            // ---- (l-1, m) ----------------------------------------------
+            const double inv_r_lm     = invr_lm[m];
+            const double inv_u01_lm   = 1.0 / u0_1_lm[m];
+            const double vz_lm_m      = u0_2_lm[m] * inv_u01_lm;
+            const double vr_lm_m      = u0_3_lm[m] * inv_u01_lm;
+            const double vphi_lm_m    = u0_4_lm[m] * inv_u01_lm;
+            const double Hphi_lm_m    = u0_6_lm[m];
+            const double Hz_lm_m      = u0_7_lm[m] * inv_r_lm;
+            const double Hr_lm_m      = u0_8_lm[m] * inv_r_lm;
+            const double P_lm_m       = gamma_m1 * u0_5_lm[m] * inv_r_lm
+                                      + 0.5 * (Hz_lm_m*Hz_lm_m
+                                             + Hr_lm_m*Hr_lm_m
+                                             + Hphi_lm_m*Hphi_lm_m);
+            const double r_lm_m       = r_lm[m];
+
+            // ---- (l+1, m) ----------------------------------------------
+            const double inv_r_lp     = invr_lp[m];
+            const double inv_u01_lp   = 1.0 / u0_1_lp[m];
+            const double vz_lp_m      = u0_2_lp[m] * inv_u01_lp;
+            const double vr_lp_m      = u0_3_lp[m] * inv_u01_lp;
+            const double vphi_lp_m    = u0_4_lp[m] * inv_u01_lp;
+            const double Hphi_lp_m    = u0_6_lp[m];
+            const double Hz_lp_m      = u0_7_lp[m] * inv_r_lp;
+            const double Hr_lp_m      = u0_8_lp[m] * inv_r_lp;
+            const double P_lp_m       = gamma_m1 * u0_5_lp[m] * inv_r_lp
+                                      + 0.5 * (Hz_lp_m*Hz_lp_m
+                                             + Hr_lp_m*Hr_lp_m
+                                             + Hphi_lp_m*Hphi_lp_m);
+            const double r_lp_m       = r_lp[m];
+
+            // ---- (l, m-1) ----------------------------------------------
+            const double inv_r_mn     = invr_l[m-1];
+            const double inv_u01_mn   = 1.0 / u0_1_l[m-1];
+            const double vz_mn        = u0_2_l[m-1] * inv_u01_mn;
+            const double vr_mn        = u0_3_l[m-1] * inv_u01_mn;
+            const double vphi_mn      = u0_4_l[m-1] * inv_u01_mn;
+            const double Hphi_mn      = u0_6_l[m-1];
+            const double Hz_mn        = u0_7_l[m-1] * inv_r_mn;
+            const double Hr_mn        = u0_8_l[m-1] * inv_r_mn;
+            const double P_mn         = gamma_m1 * u0_5_l[m-1] * inv_r_mn
+                                      + 0.5 * (Hz_mn*Hz_mn
+                                             + Hr_mn*Hr_mn
+                                             + Hphi_mn*Hphi_mn);
+            const double r_mn         = r_l[m-1];
+
+            // ---- (l, m+1) ----------------------------------------------
+            const double inv_r_mp     = invr_l[m+1];
+            const double inv_u01_mp   = 1.0 / u0_1_l[m+1];
+            const double vz_mp        = u0_2_l[m+1] * inv_u01_mp;
+            const double vr_mp        = u0_3_l[m+1] * inv_u01_mp;
+            const double vphi_mp      = u0_4_l[m+1] * inv_u01_mp;
+            const double Hphi_mp      = u0_6_l[m+1];
+            const double Hz_mp        = u0_7_l[m+1] * inv_r_mp;
+            const double Hr_mp        = u0_8_l[m+1] * inv_r_mp;
+            const double P_mp         = gamma_m1 * u0_5_l[m+1] * inv_r_mp
+                                      + 0.5 * (Hz_mp*Hz_mp
+                                             + Hr_mp*Hr_mp
+                                             + Hphi_mp*Hphi_mp);
+            const double r_mp         = r_l[m+1];
+
+            // ---- (l, m) — centre, time n ------------------------------
+            const double inv_r_c      = invr_l[m];
+            const double inv_u01_c    = 1.0 / u0_1_l[m];
+            const double rho_c        = u0_1_l[m] * inv_r_c;
+            const double vr_c         = u0_3_l[m] * inv_u01_c;
+            const double vphi_c       = u0_4_l[m] * inv_u01_c;
+            const double Hphi_c       = u0_6_l[m];
+            const double Hz_c         = u0_7_l[m] * inv_r_c;
+            const double Hr_c         = u0_8_l[m] * inv_r_c;
+            const double p_c          = gamma_m1 * u0_5_l[m] * inv_r_c;
+            const double P_c          = p_c + 0.5 * (Hz_c*Hz_c
+                                                   + Hr_c*Hr_c
+                                                   + Hphi_c*Hphi_c);
+
+            // ============================================================
+            // Step 1b — composite flux terms
+            // ============================================================
+
+            // L-axis: r·Hz at l±1  (reused 4×: u_2, u_3, u_4, u_8 z-fluxes)
             const double rHz_lp = r_lp_m * Hz_lp_m;
             const double rHz_lm = r_lm_m * Hz_lm_m;
 
@@ -280,25 +338,7 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
             const double u0vz_8_lp = u0_8_lp[m] * vz_lp_m;
             const double u0vz_8_lm = u0_8_lm[m] * vz_lm_m;
 
-            // ── M-axis composites at m±1 (single cell, no carry) ───────
-            const double r_mp    = r_l[m+1];
-            const double r_mn    = r_l[m-1];
-            const double Hr_mp   = Hr_l[m+1];
-            const double Hr_mn   = Hr_l[m-1];
-            const double Hz_mp   = Hz_l[m+1];
-            const double Hz_mn   = Hz_l[m-1];
-            const double Hphi_mp = Hphi_l[m+1];
-            const double Hphi_mn = Hphi_l[m-1];
-            const double vz_mp   = vz_l[m+1];
-            const double vz_mn   = vz_l[m-1];
-            const double vr_mp   = vr_l[m+1];
-            const double vr_mn   = vr_l[m-1];
-            const double vphi_mp = vphi_l[m+1];
-            const double vphi_mn = vphi_l[m-1];
-            const double P_mp    = P_l[m+1];
-            const double P_mn    = P_l[m-1];
-
-            // r·Hr at m±1  (reused 4× per cell: u_2, u_3, u_4, u_7 r-fluxes)
+            // M-axis: r·Hr at m±1  (reused 4×: u_2, u_3, u_4, u_7 r-fluxes)
             const double rHr_mp = r_mp * Hr_mp;
             const double rHr_mn = r_mn * Hr_mn;
 
@@ -344,14 +384,18 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
             const double u0vr_8_mp = u0_8_l[m+1] * vr_mp;
             const double u0vr_8_mn = u0_8_l[m-1] * vr_mn;
 
+            // ============================================================
+            // Step 2 — Lax–Friedrichs updates
+            // ============================================================
+
             // ── u_1 : ρ·r ────────────────────────────────────────────────
-            u_1_l[m] =
+            const double u_1_new =
                 0.25 * (u0_1_lp[m] + u0_1_lm[m] + u0_1_l[m+1] + u0_1_l[m-1])
                 - dt_inv_2dz  * (u0vz_1_lp - u0vz_1_lm)
                 - dt_inv_2drl * (u0vr_1_mp - u0vr_1_mn);
 
             // ── u_2 : ρ·v_z·r  (z-momentum) ─────────────────────────────
-            u_2_l[m] =
+            const double u_2_new =
                 0.25 * (u0_2_lp[m] + u0_2_lm[m] + u0_2_l[m+1] + u0_2_l[m-1])
                 + dt_inv_2dz  * (Hz2mP_r_lp - Hz2mP_r_lm)
                 + dt_inv_2drl * (HzHr_r_mp  - HzHr_r_mn)
@@ -359,33 +403,33 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
                 - dt_inv_2drl * (u0vr_2_mp  - u0vr_2_mn);
 
             // ── u_3 : ρ·v_r·r  (r-momentum) ─────────────────────────────
-            u_3_l[m] =
+            const double u_3_new =
                 0.25 * (u0_3_lp[m] + u0_3_lm[m] + u0_3_l[m+1] + u0_3_l[m-1])
-                + dt * (rho_l[m]*vphi_l[m]*vphi_l[m] + P_l[m] - Hphi_l[m]*Hphi_l[m])
+                + dt * (rho_c*vphi_c*vphi_c + P_c - Hphi_c*Hphi_c)
                 + dt_inv_2dz  * (HzHr_r_lp  - HzHr_r_lm)
                 + dt_inv_2drl * (Hr2mP_r_mp - Hr2mP_r_mn)
                 - dt_inv_2dz  * (u0vz_3_lp  - u0vz_3_lm)
                 - dt_inv_2drl * (u0vr_3_mp  - u0vr_3_mn);
 
             // ── u_4 : ρ·v_φ·r  (φ-momentum) ─────────────────────────────
-            u_4_l[m] =
+            const double u_4_new =
                 0.25 * (u0_4_lp[m] + u0_4_lm[m] + u0_4_l[m+1] + u0_4_l[m-1])
-                + dt * (-rho_l[m]*vr_l[m]*vphi_l[m] + Hphi_l[m]*Hr_l[m])
+                + dt * (-rho_c*vr_c*vphi_c + Hphi_c*Hr_c)
                 + dt_inv_2dz  * (HphiHz_r_lp - HphiHz_r_lm)
                 + dt_inv_2drl * (HphiHr_r_mp - HphiHr_r_mn)
                 - dt_inv_2dz  * (u0vz_4_lp   - u0vz_4_lm)
                 - dt_inv_2drl * (u0vr_4_mp   - u0vr_4_mn);
 
             // ── u_5 : ρ·e·r  (energy) ────────────────────────────────────
-            u_5_l[m] =
+            const double u_5_new =
                 0.25 * (u0_5_lp[m] + u0_5_lm[m] + u0_5_l[m+1] + u0_5_l[m-1])
-                - p_l[m] * (dt_inv_2dz  * (vz_r_lp - vz_r_lm)
-                          + dt_inv_2drl * (vr_r_mp - vr_r_mn))
+                - p_c * (dt_inv_2dz  * (vz_r_lp - vz_r_lm)
+                       + dt_inv_2drl * (vr_r_mp - vr_r_mn))
                 - dt_inv_2dz  * (u0vz_5_lp - u0vz_5_lm)
                 - dt_inv_2drl * (u0vr_5_mp - u0vr_5_mn);
 
             // ── u_6 : H_φ ───────────────────────────────────────────────
-            u_6_l[m] =
+            const double u_6_new =
                 0.25 * (u0_6_lp[m] + u0_6_lm[m] + u0_6_l[m+1] + u0_6_l[m-1])
                 + dt_inv_2dz  * (Hzvphi_lp - Hzvphi_lm)
                 + dt_inv_2drl * (Hrvphi_mp - Hrvphi_mn)
@@ -393,22 +437,40 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
                 - dt_inv_2drl * (u0vr_6_mp - u0vr_6_mn);
 
             // ── u_7 : H_z·r ─────────────────────────────────────────────
-            u_7_l[m] =
+            const double u_7_new =
                 0.25 * (u0_7_lp[m] + u0_7_lm[m] + u0_7_l[m+1] + u0_7_l[m-1])
                 + dt_inv_2drl * (Hrvz_r_mp - Hrvz_r_mn)
                 - dt_inv_2drl * (u0vr_7_mp - u0vr_7_mn);
 
             // ── u_8 : H_r·r ─────────────────────────────────────────────
-            u_8_l[m] =
+            const double u_8_new =
                 0.25 * (u0_8_lp[m] + u0_8_lm[m] + u0_8_l[m+1] + u0_8_l[m-1])
                 + dt_inv_2dz * (Hzvr_r_lp - Hzvr_r_lm)
                 - dt_inv_2dz * (u0vz_8_lp - u0vz_8_lm);
+
+            // Store new conservatives.
+            u_1_l[m] = u_1_new;
+            u_2_l[m] = u_2_new;
+            u_3_l[m] = u_3_new;
+            u_4_l[m] = u_4_new;
+            u_5_l[m] = u_5_new;
+            u_6_l[m] = u_6_new;
+            u_7_l[m] = u_7_new;
+            u_8_l[m] = u_8_new;
+
+            // ============================================================
+            // Step 3 — fused physical reconstruction at (l, m) from the
+            //          freshly written u_*.
+            // ============================================================
+            const double inv_u1_new = 1.0 / u_1_new;
+            rho_out  [m] = u_1_new * inv_r_c;
+            vz_out   [m] = u_2_new * inv_u1_new;
+            vr_out   [m] = u_3_new * inv_u1_new;
+            vphi_out [m] = u_4_new * inv_u1_new;
+            Hphi_out [m] = u_6_new;
+            Hz_out   [m] = u_7_new * inv_r_c;
+            Hr_out   [m] = u_8_new * inv_r_c;
+            e_out    [m] = u_5_new * inv_u1_new;
         }
     }
-}
-
-void Solver::UpdateCentralPhysical() {
-    // m_lo / m_hi are MPI-decomposition invariants — cached once in the
-    // constructor as m_lo_bc_ / m_hi_bc_.
-    f_.UpdatePhysicalFromU(grid_, cfg_, 1, mpi_.local_L, m_lo_bc_, m_hi_bc_);
 }

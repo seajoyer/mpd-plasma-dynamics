@@ -80,9 +80,12 @@ auto GetMassFlux(const Fields& f, const Grid& g,
 
 // ──────────────────────────────────────────────────────────────────────
 //  Thrust:  ∫ (ρ v_z² + p + |H|²  0.5) · 2π r dr
+//
+//  Pressure p is recomputed locally from p = (gamma - 1) * rho * e
 // ──────────────────────────────────────────────────────────────────────
 auto GetThrust(const Fields& f, const Grid& g,
                const SimConfig& cfg, const MPIManager& mpi) -> double {
+    const double gamma_m1 = cfg.gamma - 1.0;
 
     return IntegrateOutlet(f, g, cfg, mpi,
         [&](int l, int m) -> double {
@@ -90,7 +93,8 @@ auto GetThrust(const Fields& f, const Grid& g,
             const double H2   = f.H_z  [l][m] * f.H_z  [l][m]
                               + f.H_r  [l][m] * f.H_r  [l][m]
                               + f.H_phi[l][m] * f.H_phi[l][m];
-            return f.rho[l][m] * v_z2 + f.p[l][m] + H2 * 0.5;
+            const double p    = gamma_m1 * f.rho[l][m] * f.e[l][m];
+            return f.rho[l][m] * v_z2 + p + H2 * 0.5;
         });
 }
 

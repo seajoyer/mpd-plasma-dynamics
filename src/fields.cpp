@@ -6,7 +6,6 @@
 #include "iinitial_condition.hpp"
 
 // ---- constructor -------------------------------------------------------
-
 Fields::Fields(int r, int c, bool with_prev)
     : rows(r), cols(c), has_prev(with_prev),
       // conservative
@@ -16,7 +15,7 @@ Fields::Fields(int r, int c, bool with_prev)
       u_5 (r,c), u_6 (r,c), u_7 (r,c), u_8 (r,c),
       // physical
       rho(r,c), v_z(r,c), v_r(r,c), v_phi(r,c),
-      e(r,c),   p(r,c),   P(r,c),
+      e(r,c),
       H_z(r,c), H_r(r,c), H_phi(r,c),
       // prev
       rho_prev (with_prev ? r : 1, with_prev ? c : 1),
@@ -82,7 +81,7 @@ void Fields::SavePrev() {
 void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
                                  int l_lo, int l_hi,
                                  int m_lo, int m_hi) {
-    const double gamma_m1 = cfg.gamma - 1.0;
+    (void)cfg;  // gamma_m1 was previously used for p = (gamma-1)*rho*e; no longer needed here.
     constexpr int kOmpCellThreshold = 2048;
     const int total_cells = (l_hi - l_lo + 1) * (m_hi - m_lo + 1);
 
@@ -108,36 +107,20 @@ void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
         double* __restrict__ Hz_l    = H_z[l];
         double* __restrict__ Hr_l    = H_r[l];
         double* __restrict__ e_l     = e[l];
-        double* __restrict__ p_l     = p[l];
-        double* __restrict__ P_l     = P[l];
 
         #pragma omp simd
         for (int m = m_lo; m <= m_hi; ++m) {
             const double inv_r  = invr_l[m];
             const double inv_u1 = 1.0 / u1_l[m];
 
-            const double rho_val = u1_l[m] * inv_r;
-            const double vz_val  = u2_l[m] * inv_u1;
-            const double vr_val  = u3_l[m] * inv_u1;
-            const double vphi_val= u4_l[m] * inv_u1;
-            const double Hphi_val= u6_l[m];
-            const double Hz_val  = u7_l[m] * inv_r;
-            const double Hr_val  = u8_l[m] * inv_r;
-            const double e_val   = u5_l[m] * inv_u1;
-            const double p_val   = gamma_m1 * rho_val * e_val;
-
-            rho_l  [m] = rho_val;
-            vz_l   [m] = vz_val;
-            vr_l   [m] = vr_val;
-            vphi_l [m] = vphi_val;
-            Hphi_l [m] = Hphi_val;
-            Hz_l   [m] = Hz_val;
-            Hr_l   [m] = Hr_val;
-            e_l    [m] = e_val;
-            p_l    [m] = p_val;
-            P_l    [m] = p_val + 0.5 * (Hz_val*Hz_val
-                                        + Hr_val*Hr_val
-                                        + Hphi_val*Hphi_val);
+            rho_l  [m] = u1_l[m] * inv_r;
+            vz_l   [m] = u2_l[m] * inv_u1;
+            vr_l   [m] = u3_l[m] * inv_u1;
+            vphi_l [m] = u4_l[m] * inv_u1;
+            Hphi_l [m] = u6_l[m];
+            Hz_l   [m] = u7_l[m] * inv_r;
+            Hr_l   [m] = u8_l[m] * inv_r;
+            e_l    [m] = u5_l[m] * inv_u1;
         }
     }
 }
@@ -145,7 +128,7 @@ void Fields::UpdatePhysicalFromU(const Grid& grid, const SimConfig& cfg,
 void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
                                   int l_lo, int l_hi,
                                   int m_lo, int m_hi) {
-    const double gamma_m1 = cfg.gamma - 1.0;
+    (void)cfg;
     constexpr int kOmpCellThreshold = 2048;
     const int total_cells = (l_hi - l_lo + 1) * (m_hi - m_lo + 1);
 
@@ -171,36 +154,20 @@ void Fields::UpdatePhysicalFromU0(const Grid& grid, const SimConfig& cfg,
         double* __restrict__ Hz_l    = H_z[l];
         double* __restrict__ Hr_l    = H_r[l];
         double* __restrict__ e_l     = e[l];
-        double* __restrict__ p_l     = p[l];
-        double* __restrict__ P_l     = P[l];
 
         #pragma omp simd
         for (int m = m_lo; m <= m_hi; ++m) {
             const double inv_r  = invr_l[m];
             const double inv_u1 = 1.0 / u01_l[m];
 
-            const double rho_val = u01_l[m] * inv_r;
-            const double vz_val  = u02_l[m] * inv_u1;
-            const double vr_val  = u03_l[m] * inv_u1;
-            const double vphi_val= u04_l[m] * inv_u1;
-            const double Hphi_val= u06_l[m];
-            const double Hz_val  = u07_l[m] * inv_r;
-            const double Hr_val  = u08_l[m] * inv_r;
-            const double e_val   = u05_l[m] * inv_u1;
-            const double p_val   = gamma_m1 * rho_val * e_val;
-
-            rho_l  [m] = rho_val;
-            vz_l   [m] = vz_val;
-            vr_l   [m] = vr_val;
-            vphi_l [m] = vphi_val;
-            Hphi_l [m] = Hphi_val;
-            Hz_l   [m] = Hz_val;
-            Hr_l   [m] = Hr_val;
-            e_l    [m] = e_val;
-            p_l    [m] = p_val;
-            P_l    [m] = p_val + 0.5 * (Hz_val*Hz_val
-                                        + Hr_val*Hr_val
-                                        + Hphi_val*Hphi_val);
+            rho_l  [m] = u01_l[m] * inv_r;
+            vz_l   [m] = u02_l[m] * inv_u1;
+            vr_l   [m] = u03_l[m] * inv_u1;
+            vphi_l [m] = u04_l[m] * inv_u1;
+            Hphi_l [m] = u06_l[m];
+            Hz_l   [m] = u07_l[m] * inv_r;
+            Hr_l   [m] = u08_l[m] * inv_r;
+            e_l    [m] = u05_l[m] * inv_u1;
         }
     }
 }

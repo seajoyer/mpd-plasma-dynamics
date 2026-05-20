@@ -206,8 +206,6 @@ void VtkIC::Apply(Fields& f, const Grid& grid,
                            ? static_cast<double>(impl_->nj - 1) / m_max_new
                            : 0.0;
 
-    const double gamma = cfg.gamma;
-
     for (int l = 1; l < f.rows - 1; ++l) {
         const int    l_global = l_start + l - 1;
         const double i_frac   = static_cast<double>(l_global) * i_scale;
@@ -227,13 +225,6 @@ void VtkIC::Apply(Fields& f, const Grid& grid,
             f.H_r  [l][m] = impl_->Interp(impl_->H_r,   i_frac, j_frac);
             f.H_phi[l][m] = impl_->Interp(impl_->H_phi, i_frac, j_frac);
             f.e    [l][m] = impl_->Interp(impl_->e,     i_frac, j_frac);
-
-            // ---- Derived scalars (same as ExpressionIC) ----
-            f.p[l][m] = (gamma - 1.0) * f.rho[l][m] * f.e[l][m];
-            f.P[l][m] = f.p[l][m]
-                      + 0.5 * (f.H_z  [l][m] * f.H_z  [l][m]
-                             + f.H_r  [l][m] * f.H_r  [l][m]
-                             + f.H_phi[l][m] * f.H_phi[l][m]);
         }
     }
 }

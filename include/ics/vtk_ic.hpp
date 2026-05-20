@@ -29,8 +29,9 @@
 ///   Vector  "Velocity"       → (v_z, v_r, v_phi)  components (0, 1, 2)
 ///   Vector  "MagneticField"  → (H_z, H_r, H_phi)  components (0, 1, 2)
 ///
-/// Derived fields (p, P) are recomputed from (rho, e, H_*) after all
-/// primaries have been assigned — consistent with ExpressionIC.
+/// Derived fields p and P are not stored anywhere — they are recomputed
+/// on demand from (rho, e, H_*) inside the LF kernel.  See
+/// include/fields.hpp for the closed forms.
 ///
 /// ═══════════════════════════════════════════════════════════════════
 /// Grid-size compatibility

@@ -36,11 +36,7 @@
 ///                Time-level consistency: the AxisLF helpers derive every
 ///                physical quantity they need directly from the conservative
 ///                arrays f.u0_*, which carry the time-n state throughout
-///                the entire Solver::Advance() call.  This guarantees the
-///                half-stencil reads time-n neighbour values, matching the
-///                semantics of the central LF kernel — even though the BC
-///                runs after Solver::UpdateCentralPhysical() has rewritten
-///                the physical field arrays to time n+1 for interior cells.
+///                the entire Solver::Advance() call.
 ///
 /// Step flow for each boundary cell
 /// ─────────────────────────────────
