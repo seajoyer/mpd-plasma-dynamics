@@ -4,24 +4,24 @@ physics:
   H_z0:  0.25
 
 time:
-  T:  4.0
-  dt: 0.000025
+  T:  6
+  dt: 1.0e-7
 
 adaptive_dt:
-  enabled:       false
-  cfl_number:    0.45
+  enabled:       true
+  cfl_number:    0.5
   growth_factor: 1.10
   dt_min:        1.0e-10
   dt_max:        5.0e-5
 
 convergence:
-  threshold:       1.0e-5
+  threshold:       0.0
   check_frequency: 100
 
 output:
   directory: output
   run_name:  run
-  vtk_step:  50000000
+  vtk_step:  5000
 
 parallel:
   openmp_threads: 0
@@ -39,70 +39,34 @@ grid:
 # printed for monitoring.  For maximum performance set every flag to false.
 #
 diagnostics:
-  cfl_check:            false
-  conserved_integrals:  true
-  console_checkpoint:   true 
-  outlet_diagnostics:   true
-  startup_verification: true
-  write_mpi_rank:       false
-
+  cfl_check:            false   # CheckCfl every 100 steps (MaxWaveSpeed Allreduce)
+  conserved_integrals:  false   # Conserved-integral table every 1000 steps + final drift report
+  console_checkpoint:   true    # Per-1000-step (t, dt, rho, v_z, ...) row
+  outlet_diagnostics:   true    # Final mass-flux and thrust at the outlet plane
+  startup_verification: false   # Ghost-exchange round-trip and radial-symmetry checks at startup
+  write_mpi_rank:       false   # Include MPI_Rank scalar array in VTK frames for decomposition visualisation
 
 # ── Geometry ─────────────────────────────────────────────────────────────────
 #
-# Ported from the old single-file main.cpp's hardcoded r1(z) / r2(z) profile:
-#
-#   r1(z) = 0.2                          for z < 0.3
-#   r1(z) = 0.2 - 10*(z - 0.3)^2         for 0.3 <= z < 0.4
-#   r1(z) =       10*(z - 0.5)^2         for 0.4 <= z < 0.478
-#   r1(z) = 0.005                        for z >= 0.478
-#   r2(z) = 0.8                          (constant)
-#
-# Parameter mapping to short_cathode_parabolic (verified algebraically):
-#
-#   z_flat_end   = 0.3      (start of descending parabola)
-#   z_throat     = 0.4      (throat / minimum of inner radius)
-#   z_thin_start = 0.478    (start of thin-electrode section)
-#   r_flat       = 0.200    (cathode-face inner radius)
-#   r_thin       = 0.005    (thin-electrode inner radius)
-#   r_outer      = 0.800    (constant outer wall)
-#
-# Coefficient check:
-#   A = r_flat / (2*(z_throat - z_flat_end)^2) = 0.2 / (2*0.1^2) = 10  ✓
-#   z_arc_center = 2*z_throat - z_flat_end    = 2*0.4 - 0.3    = 0.5  ✓
-#
-# Both match the old code's hardcoded factors of 10 and the (z - 0.5)^2 form
-# on the ascending arc, so the new geometry reproduces the old r(z) profile
-# and dr/dz exactly to machine precision.
-#
-# Alternative geometry types available:
-#   short_cathode_cosine    C¹ cosine-smoothed single-transition throat
-#   villani_mpdt            Coaxial MPDT with separate cathode/anode tips
+#   short_cathode_cosine
+#     C¹ cosine-smoothed throat transition.
+#     params:
+#       z_center:               0.31    # axial centre of the cosine transition
+#       transition_half_width:  0.015   # half-width of the transition band
+#       r_inner_before:         0.200   # cathode-face inner radius
+#       r_inner_after:          0.005   # thin-electrode inner radius
+#       r_outer:                0.800   # anode (outer wall) radius
 #
 geometry:
-  type: short_cathode_parabolic
+  type: short_cathode_cosine
   params:
-    z_flat_end:   0.300
-    z_throat:     0.400
-    z_thin_start: 0.478
-    r_flat:       0.200
-    r_thin:       0.005
-    r_outer:      0.800
+    z_center:               0.31
+    transition_half_width:  0.02
+    r_inner_before:         0.200
+    r_inner_after:          0.005
+    r_outer:                0.800
 
 # ── Initial conditions ────────────────────────────────────────────────────────
-#
-# Ported verbatim from the old single-file main.cpp interior initialisation
-# loop.  Old code:
-#
-#     rho[l][m]   = 1.0;
-#     v_z[l][m]   = 0.1;
-#     v_r[l][m]   = 0.1;
-#     v_phi[l][m] = 0;
-#     H_phi[l][m] = (1 - 0.9 * l * dz) * r_0 / r[l][m];
-#     H_z[l][m]   = H_z0;
-#     H_r[l][m]   = H_z[l][m] * r_z[l][m];
-#     e[l][m]     = beta / (2.0 * (gamma - 1.0));
-#
-# Derived fields p, P are computed automatically from the primaries.
 #
 # ── Mode A: expression IC (default) ──────────────────────────────────────────
 #
@@ -133,7 +97,7 @@ geometry:
 #   Physics constants  (from the [physics] block)
 #     gamma   beta   H_z0   r_0
 #
-#   Spatial variables  (cell-local, read-only)
+#   Spatial variables  (cell-local)
 #     z       axial coordinate  [l_global × dz]
 #     r       radial coordinate [grid.r[l][m]]
 #     r_z     dr/dz skew metric [grid.r_z[l][m]]
@@ -153,6 +117,8 @@ geometry:
 #   Each expression may reference fields earlier in this sequence.
 #
 initial_conditions:
+#  initial_conditions:
+#    vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
   rho:   1.0
   v_z:   0.1
   v_r:   0.1
@@ -163,21 +129,6 @@ initial_conditions:
   e:     "beta / (2 * (gamma - 1))"
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
-#
-# Ported verbatim from the old single-file main.cpp's four hardcoded BC blocks
-# (LEFT/RIGHT/UPPER/LOWER).  Mapping notes:
-#
-#   • The old code wrote PRIMITIVES then converted to conservatives.  The new
-#     PerFieldBC does the same: physical values are assigned per the rules
-#     below and u_* is rebuilt automatically via RebuildUFromPhysical().
-#
-#   • L_LO inlet velocity in the old code was
-#         v_z[0][m] = u_2[1][m] / (rho[0][m] * r[0][m])
-#     With rho[0][m] fixed to 1.0 and r[0][m] essentially equal to r[1][m] on
-#     the L_LO face (same m, l differs only by dz with r(z) varying smoothly),
-#     this evaluates to v_z_nb (zero-gradient mass flux from the interior).
-#     Encoded literally as an expression so it remains faithful even when
-#     r varies along z.
 #
 # Each face (l_lo, l_hi, m_lo, m_hi) is a sequence of segments.
 # Segments are applied in order; together they should cover the full face.
@@ -217,7 +168,7 @@ initial_conditions:
 #   Neighbour cell: r_nb  r_z_nb
 #   Neighbour fields: rho_nb  v_z_nb  v_r_nb  v_phi_nb  e_nb
 #                     H_z_nb  H_r_nb  H_phi_nb
-#   Boundary values (evaluation order, cross-field references):
+#   Boundary values (evaluation order):
 #                     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
 #
 # Free-axis convention
@@ -228,38 +179,17 @@ initial_conditions:
 boundary_conditions:
 
   # ── Inlet (z = 0) ────────────────────────────────────────────────────────
-  #
-  # Old main.cpp:
-  #     rho[0][m]   = 1.0;                                  # fixed
-  #     v_phi[0][m] = 0;                                    # fixed
-  #     v_z[0][m]   = u_2[1][m] / (rho[0][m] * r[0][m]);    # extrapolated mass flux
-  #     v_r[0][m]   = 0;                                    # fixed
-  #     H_phi[0][m] = r_0 / r[0][m];                        # prescribed
-  #     H_z[0][m]   = H_z0;                                 # fixed
-  #     H_r[0][m]   = 0;                                    # fixed
-  #     e[0][m]     = beta/(2*(gamma-1)) * rho[0][m]^(gamma-1);   # isentropic
-  #
-  # With rho[0][m] = 1.0 fixed, the energy expression reduces to a constant
-  # beta/(2*(gamma-1)).  v_z is encoded as the literal mass-flux extrapolation.
-  #
   l_lo:
-    - rho:   { dirichlet: 1.0 }
-      v_z:   "rho_nb * v_z_nb * r_nb / (rho * r)"
-      v_r:   { dirichlet: 0.0 }
-      v_phi: { dirichlet: 0.0 }
-      e:     "beta / (2 * (gamma - 1)) * pow(rho, gamma - 1)"
+    - rho:   neumann
+      v_z:   { dirichlet: 0.0 }
+      v_r:   neumann
+      v_phi: neumann
+      e:     neumann
       H_z:   "H_z0"
       H_r:   { dirichlet: 0.0 }
       H_phi: "r_0 / r"
 
   # ── Outlet (z = L) ───────────────────────────────────────────────────────
-  #
-  # Old main.cpp: zero-gradient extrapolation on all 8 conservative variables
-  # (u_1..u_8 at L_max copied from L_max-1).  Equivalent to Neumann on every
-  # physical field, since u_* is rebuilt from the physicals via
-  # RebuildUFromPhysical() and the geometry factor r is identical between
-  # boundary and neighbour on the L_HI face (same m, adjacent l).
-  #
   l_hi:
     - rho:   neumann
       v_z:   neumann
@@ -271,20 +201,6 @@ boundary_conditions:
       H_phi: neumann
 
   # ── Outer wall (r = r_outer) ─────────────────────────────────────────────
-  #
-  # Old main.cpp:
-  #     rho[l][M_max]   = rho[l][M_max-1];
-  #     v_z[l][M_max]   = v_z[l][M_max-1];
-  #     v_r[l][M_max]   = v_z[l][M_max]   * r_z[l][M_max];    # wall-tangent (wall-cell slope)
-  #     v_phi[l][M_max] = v_phi[l][M_max-1];
-  #     e[l][M_max]     = e[l][M_max-1];
-  #     H_phi[l][M_max] = H_phi[l][M_max-1];
-  #     H_z[l][M_max]   = H_z[l][M_max-1];
-  #     H_r[l][M_max]   = H_z[l][M_max]   * r_z[l][M_max];    # wall-tangent (wall-cell slope)
-  #
-  # M_HI convention uses the *wall-cell* slope, so the expressions reference
-  # v_z and H_z (already evaluated earlier in the same cell), not v_z_nb.
-  #
   m_hi:
     - rho:   neumann
       v_z:   neumann
@@ -297,40 +213,19 @@ boundary_conditions:
 
   # ── Inner wall + axis (r = r_inner, then axis of symmetry) ───────────────
   #
-  # Old main.cpp split this face into two regions at l = L_end (= 320).
-  # That magic number was NOT independent — it was the l-index at which the
-  # parabolic inner wall has collapsed to (essentially) the axis:
+  # Three segments in l-direction (global l index along the M_LO face):
   #
-  #     L_end = floor(z_throat / dz) = floor(0.4 / (1/800)) = 320
+  #   [0, 235]    Solid cathode wall. Was calculated as L_max * (z_center - transition_half_width) + 3 cells for robustness
+  #               Wall-tangent uses NEIGHBOUR slope (M_LO convention).
   #
-  # So L_end is fully determined by the geometry once z_throat and L_max
-  # (= 1/dz) are fixed.  If you change either of those, recompute it as:
+  #   [236, 263]  Cathode tip / injection region.
+  #               Fixed density, energy, and H_z; wall-tangent for H_r.
   #
-  #     L_end = floor(z_throat * L_max)
-  #
-  # Region semantics (from the old code):
-  #
-  #   l ∈ [1, L_end]    Standard solid wall.
-  #     rho[l][0]   = rho[l][1];               # neumann
-  #     v_z[l][0]   = v_z[l][1];               # neumann
-  #     v_r[l][0]   = v_z[l][1] * r_z[l][1];   # wall-tangent (NEIGHBOUR slope)
-  #     v_phi[l][0] = v_phi[l][1];             # neumann
-  #     e[l][0]     = e[l][1];                 # neumann
-  #     H_phi[l][0] = H_phi[l][1];             # neumann
-  #     H_z[l][0]   = H_z[l][1];               # neumann
-  #     H_r[l][0]   = H_z[l][1] * r_z[l][1];   # wall-tangent (NEIGHBOUR slope)
-  #
-  #   l ∈ (L_end, L_max)   Axis of symmetry (r → 0).
-  #     One-sided Lax–Friedrichs update for u_1, u_2, u_5, u_7
-  #     (mapped to physical fields rho, v_z, e, H_z).
-  #     v_r, v_phi, H_r, H_phi are zero by symmetry.
-  #
-  # The wall-tangent expressions use the *interior-neighbour* slope
-  # (v_z_nb, r_z_nb) per the M_LO convention — this matches the old code's
-  # v_z[l][1] * r_z[l][1] which reads from the interior cell m = 1.
-  #
+  #   [264, end]  Axis of symmetry (r → 0).
+  #               Lax–Friedrichs update for rho, v_z, e, H_z.
+  #               All other components are zero by symmetry.
   m_lo:
-    - range: [0, 320]
+    - range: [0, 235]
       rho:   neumann
       v_z:   neumann
       v_r:   "v_z_nb * r_z_nb"
@@ -340,7 +235,17 @@ boundary_conditions:
       H_r:   "H_z_nb * r_z_nb"
       H_phi: neumann
 
-    - range: [321, -1]
+    - range: [236, 263]
+      rho:   { dirichlet: 1.0 }
+      v_z:   neumann
+      v_r:   neumann
+      v_phi: { dirichlet: 0.0 }
+      e:     "beta / (2 * (gamma - 1))"
+      H_z:   neumann
+      H_r:   "H_z_nb * r_z_nb"
+      H_phi: neumann
+
+    - range: [264, -1]
       rho:   axis_lf
       v_z:   axis_lf
       v_r:   { dirichlet: 0.0 }

@@ -32,7 +32,23 @@ Solver::Solver(const SimConfig& cfg, const MPIManager& mpi,
 // ============================================================
 // Public entry point — with comm/compute overlap
 // ============================================================
-
+//
+// Steps:
+//
+//   1   PostGhostExchange       non-blocking u0_* exchange
+//   2   LF kernel (deep)        u_* only — no physical writes
+//   3   FinishGhostExchange     wait
+//   4   LF kernel (boundary)    u_* only — no physical writes
+//   5   ReconstructBCNeighborStrips
+//                               1-row/col physical reconstruction so the BC
+//                               apply below sees up-to-date neighbour values
+//   6   FaceBC::Apply ×4
+//   7   ReconstructBCBoundaryStrips
+//                               keep boundary physicals in sync (used at
+//                               corners by next step's neighbour reads, and
+//                               by any diagnostic immediately after Advance)
+//   8   pointer swap u_* <-> u0_*
+//
 void Solver::Advance(double dt) {
     current_dt_ = dt;
 
@@ -86,30 +102,19 @@ void Solver::Advance(double dt) {
         }
     }
 
-    // ---- 5. Boundary conditions -------------------------------------------
+    // ---- 5. Reconstruct each owned BC's neighbour strip from u_* ----------
+    ReconstructBCNeighborStrips();
+
+    // ---- 6. Boundary conditions -------------------------------------------
     bc_l_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_m_lo_.Apply(f_, grid_, cfg_, mpi_, dt);
     bc_l_hi_.Apply(f_, grid_, cfg_, mpi_, dt);
 
-    // Reconstruct only the boundary strips that the FaceBCs just wrote u for.
-    // FaceBCs write u_* via RebuildUFromPhysical and/or the AxisLF helpers;
-    // the physical state at those cells must be brought back into sync with
-    // those new u_* values before the next step.
-    if (mpi_.IsLLoBoundary()) {
-        f_.UpdatePhysicalFromU(grid_, cfg_, 1, 1, 1, local_M);
-    }
-    if (mpi_.IsLHiBoundary()) {
-        f_.UpdatePhysicalFromU(grid_, cfg_, local_L, local_L, 1, local_M);
-    }
-    if (mpi_.IsMLoBoundary()) {
-        f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, 1, 1);
-    }
-    if (mpi_.IsMHiBoundary()) {
-        f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
-    }
+    // ---- 7. Reconstruct only the boundary strips the FaceBCs just touched -
+    ReconstructBCBoundaryStrips();
 
-    // ---- 6. Advance u0 ← u (pointer swap, O(1)) ---------------------------
+    // ---- 8. Advance u0 ← u (pointer swap, O(1)) ---------------------------
     std::swap(f_.u_1, f_.u0_1);
     std::swap(f_.u_2, f_.u0_2);
     std::swap(f_.u_3, f_.u0_3);
@@ -118,6 +123,28 @@ void Solver::Advance(double dt) {
     std::swap(f_.u_6, f_.u0_6);
     std::swap(f_.u_7, f_.u0_7);
     std::swap(f_.u_8, f_.u0_8);
+
+    // Conservative state has advanced; the interior physicals are now stale
+    // relative to u0_*.  The boundary strips were just refreshed by step 7
+    // (and survive the swap because they were derived from the same u_* that
+    // is now u0_*), so a future SyncPhysicalState() will only re-write what's
+    // actually out of date.
+    physical_dirty_ = true;
+}
+
+// ============================================================
+// Public on-demand reconstruction for diagnostics / I/O
+// ============================================================
+//
+// After Advance() the canonical "current" state lives in u0_* (the array
+// just received the swap).  Callers about to read full-domain physicals
+// invoke this once; the dirty-flag guard makes redundant back-to-back calls
+// (e.g. several diagnostic blocks firing on the same step) free.
+//
+void Solver::SyncPhysicalState() {
+    if (!physical_dirty_) return;
+    f_.UpdatePhysicalFromU0(grid_, cfg_, 1, mpi_.local_L, 1, mpi_.local_M);
+    physical_dirty_ = false;
 }
 
 // ============================================================
@@ -141,7 +168,58 @@ void Solver::FinishGhostExchange() {
 }
 
 // ============================================================
-// Lax–Friedrichs central update — fused with physical reconstruction
+// Physical-strip helpers
+// ============================================================
+//
+// Each FaceBC reads physical values on a single one-cell-thick "neighbour
+// strip" while computing Neumann / Dirichlet / Expression updates.  These
+// helpers reconstruct just those strips from the fresh u_* values that the
+// LF kernel produced this step.
+
+void Solver::ReconstructBCNeighborStrips() {
+    const int local_L = mpi_.local_L;
+    const int local_M = mpi_.local_M;
+    const int m_lo_bc = m_lo_bc_;
+    const int m_hi_bc = m_hi_bc_;
+    const int l_lo_inner = 2;
+    const int l_hi_inner = local_L - 1;
+
+    if (mpi_.IsLLoBoundary() && local_L >= 2 && m_lo_bc <= m_hi_bc) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 2, 2, m_lo_bc, m_hi_bc);
+    }
+    if (mpi_.IsLHiBoundary() && local_L >= 2 && m_lo_bc <= m_hi_bc) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, local_L - 1, local_L - 1,
+                               m_lo_bc, m_hi_bc);
+    }
+    if (mpi_.IsMLoBoundary() && l_lo_inner <= l_hi_inner) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, l_lo_inner, l_hi_inner, 2, 2);
+    }
+    if (mpi_.IsMHiBoundary() && l_lo_inner <= l_hi_inner) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, l_lo_inner, l_hi_inner,
+                               local_M - 1, local_M - 1);
+    }
+}
+
+void Solver::ReconstructBCBoundaryStrips() {
+    const int local_L = mpi_.local_L;
+    const int local_M = mpi_.local_M;
+
+    if (mpi_.IsLLoBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 1, 1, 1, local_M);
+    }
+    if (mpi_.IsLHiBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, local_L, local_L, 1, local_M);
+    }
+    if (mpi_.IsMLoBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, 1, 1);
+    }
+    if (mpi_.IsMHiBoundary()) {
+        f_.UpdatePhysicalFromU(grid_, cfg_, 1, local_L, local_M, local_M);
+    }
+}
+
+// ============================================================
+// Lax–Friedrichs central update
 // ============================================================
 
 void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
@@ -161,11 +239,6 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
     auto** u_5  = f_.u_5.Raw();   auto** u_6  = f_.u_6.Raw();
     auto** u_7  = f_.u_7.Raw();   auto** u_8  = f_.u_8.Raw();
 
-    auto** rho   = f_.rho.Raw();   auto** v_z  = f_.v_z.Raw();
-    auto** v_r   = f_.v_r.Raw();   auto** v_phi= f_.v_phi.Raw();
-    auto** e_arr = f_.e.Raw();
-    auto** H_z   = f_.H_z.Raw();   auto** H_r  = f_.H_r.Raw();
-    auto** H_phi = f_.H_phi.Raw();
     const double** r     = r_ptr_;                    // cached once in ctor
     const double*  dr    = dr_ptr_;                   // cached once in ctor
     const double** inv_r = grid_.inv_r.Raw();         // precomputed 1/r
@@ -193,20 +266,11 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
         const double* r_lm   = r[l-1];     const double* r_l   = r[l];     const double* r_lp   = r[l+1];
         const double* invr_lm= inv_r[l-1]; const double* invr_l= inv_r[l]; const double* invr_lp= inv_r[l+1];
 
-        // ---- output row pointers (u_* and physical at l) ----
+        // ---- output row pointers ----
         double* __restrict__ u_1_l = u_1[l];  double* __restrict__ u_2_l = u_2[l];
         double* __restrict__ u_3_l = u_3[l];  double* __restrict__ u_4_l = u_4[l];
         double* __restrict__ u_5_l = u_5[l];  double* __restrict__ u_6_l = u_6[l];
         double* __restrict__ u_7_l = u_7[l];  double* __restrict__ u_8_l = u_8[l];
-
-        double* __restrict__ rho_out   = rho[l];
-        double* __restrict__ vz_out    = v_z[l];
-        double* __restrict__ vr_out    = v_r[l];
-        double* __restrict__ vphi_out  = v_phi[l];
-        double* __restrict__ Hz_out    = H_z[l];
-        double* __restrict__ Hr_out    = H_r[l];
-        double* __restrict__ Hphi_out  = H_phi[l];
-        double* __restrict__ e_out     = e_arr[l];
 
         #pragma omp simd
         for (int m = m_lo; m <= m_hi; ++m) {
@@ -448,7 +512,9 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
                 + dt_inv_2dz * (Hzvr_r_lp - Hzvr_r_lm)
                 - dt_inv_2dz * (u0vz_8_lp - u0vz_8_lm);
 
-            // Store new conservatives.
+            // ============================================================
+            // Step 3 — store new conservatives.
+            // ============================================================
             u_1_l[m] = u_1_new;
             u_2_l[m] = u_2_new;
             u_3_l[m] = u_3_new;
@@ -457,20 +523,6 @@ void Solver::ComputeCentralUpdateRange(int l_lo, int l_hi, int m_lo, int m_hi) {
             u_6_l[m] = u_6_new;
             u_7_l[m] = u_7_new;
             u_8_l[m] = u_8_new;
-
-            // ============================================================
-            // Step 3 — fused physical reconstruction at (l, m) from the
-            //          freshly written u_*.
-            // ============================================================
-            const double inv_u1_new = 1.0 / u_1_new;
-            rho_out  [m] = u_1_new * inv_r_c;
-            vz_out   [m] = u_2_new * inv_u1_new;
-            vr_out   [m] = u_3_new * inv_u1_new;
-            vphi_out [m] = u_4_new * inv_u1_new;
-            Hphi_out [m] = u_6_new;
-            Hz_out   [m] = u_7_new * inv_r_c;
-            Hr_out   [m] = u_8_new * inv_r_c;
-            e_out    [m] = u_5_new * inv_u1_new;
         }
     }
 }

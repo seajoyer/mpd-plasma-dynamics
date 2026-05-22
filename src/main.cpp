@@ -172,6 +172,7 @@ auto main(int argc, char* argv[]) -> int {
     // ----------------------------------------------------------------
     // 7. Time loop
     // ----------------------------------------------------------------
+
     double t = 0.0;
     int step_count = 0;
     bool converged = false;
@@ -200,6 +201,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     if (cfg.vtk_step > 0) {
+        // Physicals are already in sync after InitPhysical/InitConservative,
         io.WriteFrame(0, fields, grid);
     }
 
@@ -214,14 +216,18 @@ auto main(int argc, char* argv[]) -> int {
         t += dt;
         ++step_count;
 
+        // -- adaptive dt: reads rho, v_*, H_*, e --------------------------
         constexpr int kDtRecomputeStride = 10;
         if (cfg.adaptive_dt && step_count % kDtRecomputeStride == 0) {
+            solver.SyncPhysicalState();
             dt = Diagnostics::ComputeDt(fields, cfg, grid,
                                         mpi.local_L, mpi.local_M,
                                         mpi, dt, prev_max_speed);
         }
 
+        // -- convergence check: reads all 7 primary physicals -------------
         if (cfg.convergence_threshold > 0.0 && step_count % cfg.check_frequency == 0) {
+            solver.SyncPhysicalState();
             const double change =
                 Diagnostics::SolutionChange(fields, mpi.local_L, mpi.local_M);
             if (mpi.rank == 0) {
@@ -238,18 +244,25 @@ auto main(int argc, char* argv[]) -> int {
             fields.SavePrev();
         }
 
+        // -- CFL check: reads rho, v_*, H_*, e ---------------------------
         if (cfg.diagnostics.cfl_check && step_count % 100 == 0) {
+            solver.SyncPhysicalState();
             Diagnostics::CheckCfl(fields, cfg, grid,
                                   mpi, mpi.local_L, mpi.local_M, dt,
                                   step_count);
         }
 
+        // -- VTK output: reads all physicals -----------------------------
         if (cfg.vtk_step > 0 && step_count % cfg.vtk_step == 0) {
+            solver.SyncPhysicalState();
             io.WriteFrame(step_count, fields, grid);
         }
 
+        // -- per-1000-step console row: reads physicals at one cell ------
+        // -- per-1000-step integrals  : reads u0_* only ------------------
         if (step_count % 1000 == 0) {
             if (cfg.diagnostics.console_checkpoint) {
+                solver.SyncPhysicalState();
                 double local_vals[5] = {0, 0, 0, 0, 0};
                 if (owns_checkpoint) {
                     local_vals[0] = fields.rho  [check_l_local][check_m_local];
@@ -263,8 +276,8 @@ auto main(int argc, char* argv[]) -> int {
                            MPI_COMM_WORLD);
                 if (mpi.rank == 0) {
                     std::printf("%-14.6f %-14.6e %-14.6f %-14.6f %-14.6f %-14.6f %-14.6f\n",
-                                t, dt, global_vals[0], global_vals[1], global_vals[2],
-                                global_vals[3], global_vals[4]);
+                                t, dt, global_vals[0], global_vals[1],
+                                global_vals[2], global_vals[3], global_vals[4]);
                 }
             }
 
@@ -280,6 +293,9 @@ auto main(int argc, char* argv[]) -> int {
         std::printf("\nCalculation time : %.3f sec  (%d steps)\n", mpi.Wtime() - begin,
                     step_count);
     }
+
+    // ---- Final VTK + closing diagnostics -------------------------------
+    solver.SyncPhysicalState();
 
     io.WriteFrame(step_count, fields, grid);
 
