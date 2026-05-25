@@ -4,24 +4,24 @@ physics:
   H_z0:  0.25
 
 time:
-  T:  6
-  dt: 1.0e-7
+  T:  10.0
+  dt: 0.0000125
 
 adaptive_dt:
-  enabled:       true
+  enabled:       false
   cfl_number:    0.5
   growth_factor: 1.10
   dt_min:        1.0e-10
-  dt_max:        5.0e-5
+  dt_max:        2.5e-5
 
 convergence:
-  threshold:       0.0
+  threshold:       1.0e-7
   check_frequency: 100
 
 output:
   directory: output
   run_name:  run
-  vtk_step:  5000
+  vtk_step:  50000000
 
 parallel:
   openmp_threads: 0
@@ -29,96 +29,32 @@ parallel:
   mpi_dims_m: 0
 
 grid:
-  L_max: 800
-  M_max: 400
+  L_max: 1600
+  M_max: 800
 
 # ── Diagnostics ──────────────────────────────────────────────────────────────
-#
-# All five toggles below control purely observational features.  Disabling
-# them changes no physical or numerical result — only what's computed and
-# printed for monitoring.  For maximum performance set every flag to false.
-#
 diagnostics:
-  cfl_check:            false   # CheckCfl every 100 steps (MaxWaveSpeed Allreduce)
-  conserved_integrals:  false   # Conserved-integral table every 1000 steps + final drift report
-  console_checkpoint:   true    # Per-1000-step (t, dt, rho, v_z, ...) row
-  outlet_diagnostics:   true    # Final mass-flux and thrust at the outlet plane
-  startup_verification: false   # Ghost-exchange round-trip and radial-symmetry checks at startup
-  write_mpi_rank:       false   # Include MPI_Rank scalar array in VTK frames for decomposition visualisation
+  cfl_check:            false
+  conserved_integrals:  false
+  console_checkpoint:   true 
+  outlet_diagnostics:   true
+  startup_verification: false
+  write_mpi_rank:       false
+
 
 # ── Geometry ─────────────────────────────────────────────────────────────────
-#
-#   short_cathode_cosine
-#     C¹ cosine-smoothed throat transition.
-#     params:
-#       z_center:               0.31    # axial centre of the cosine transition
-#       transition_half_width:  0.015   # half-width of the transition band
-#       r_inner_before:         0.200   # cathode-face inner radius
-#       r_inner_after:          0.005   # thin-electrode inner radius
-#       r_outer:                0.800   # anode (outer wall) radius
-#
 geometry:
-  type: short_cathode_cosine
+  type: short_cathode_parabolic
   params:
-    z_center:               0.31
-    transition_half_width:  0.02
-    r_inner_before:         0.200
-    r_inner_after:          0.005
-    r_outer:                0.800
+    z_flat_end:   0.300
+    z_throat:     0.400
+    z_thin_start: 0.478
+    r_flat:       0.200
+    r_thin:       0.005
+    r_outer:      0.800
 
 # ── Initial conditions ────────────────────────────────────────────────────────
-#
-# ── Mode A: expression IC (default) ──────────────────────────────────────────
-#
-# Fields are specified as mathematical expressions evaluated cell-by-cell.
-# Derived fields (p, P) are computed automatically from the primaries.
-#
-# ── Mode B: VTK restart ───────────────────────────────────────────────────────
-#
-# Set vtk_file to the path of a step_NNNN.vtk file written by a previous run.
-# All eight physical fields are read from the file and bilinearly interpolated
-# onto the current grid.  This supports:
-#
-#   • Exact restart  — same L_max / M_max: field values are copied 1-to-1,
-#                      with no floating-point blending.
-#   • Resolution remap — different L_max / M_max: values are interpolated
-#                      in fractional (z/L, m/M_max) space so features are
-#                      preserved across refinement or coarsening.
-#
-# The file must be accessible from every MPI rank (shared/NFS filesystem).
-# Any expression fields listed alongside vtk_file are silently ignored.
-#
-# Example:
-#   initial_conditions:
-#     vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
-#
-# ── Available symbols for expression IC ──────────────────────────────────────
-#
-#   Physics constants  (from the [physics] block)
-#     gamma   beta   H_z0   r_0
-#
-#   Spatial variables  (cell-local)
-#     z       axial coordinate  [l_global × dz]
-#     r       radial coordinate [grid.r[l][m]]
-#     r_z     dr/dz skew metric [grid.r_z[l][m]]
-#
-#   Math constant
-#     pi
-#
-#   Standard functions
-#     sin  cos  tan  asin  acos  atan  atan2
-#     exp  log  log2 log10 sqrt  pow   abs   sign
-#     min  max  clamp
-#     (Use exp(1) for Euler's number — 'e' is reserved for specific energy.)
-#
-# ── Evaluation order ─────────────────────────────────────────────────────────
-#
-#   rho → v_z → v_r → v_phi → H_z → H_r → H_phi → e
-#   Each expression may reference fields earlier in this sequence.
-#
 initial_conditions:
-#  initial_conditions:
-#    vtk_file: "output/run_01-01-2025_12:00:00:000/step_5000.vtk"
   rho:   1.0
   v_z:   0.1
   v_r:   0.1
@@ -129,62 +65,15 @@ initial_conditions:
   e:     "beta / (2 * (gamma - 1))"
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
-#
-# Each face (l_lo, l_hi, m_lo, m_hi) is a sequence of segments.
-# Segments are applied in order; together they should cover the full face.
-#
-# Segment fields
-# ──────────────
-#   range       (optional)  [global_lo, global_hi] along the free axis.
-#                           Negative value = sentinel for face start/end.
-#                           Omit entirely  = full face (same as [-1, -1]).
-#
-#   rho / v_z / v_r / v_phi / e / H_z / H_r / H_phi
-#               (all optional, default = neumann)
-#
-# Condition syntax
-# ────────────────
-#   neumann              Zero-gradient: f_bc = f_interior  (offset = 0)
-#   { neumann: G }       Constant-offset: f_bc = f_interior + G
-#
-#   dirichlet            Fix to 0
-#   { dirichlet: V }     Fix to the constant value V
-#
-#   "expression"         Evaluate a formula at each boundary cell.
-#   { expr: "..." }      All physics constants, grid quantities,
-#                        neighbour values, and previously-evaluated
-#                        boundary values are available as symbols.
-#                        See FieldCondType::Expression documentation
-#                        for the complete symbol table.
-#
-#   axis_lf              One-sided Lax–Friedrichs update for the axis of
-#                        symmetry.  Valid only for rho / v_z / e / H_z
-#                        on the M_LO face.
-#
-# Expression symbol quick-reference
-# ──────────────────────────────────
-#   Physics:   gamma  beta  H_z0  r_0  dz  dr
-#   Boundary cell:  r  r_z  z
-#   Neighbour cell: r_nb  r_z_nb
-#   Neighbour fields: rho_nb  v_z_nb  v_r_nb  v_phi_nb  e_nb
-#                     H_z_nb  H_r_nb  H_phi_nb
-#   Boundary values (evaluation order):
-#                     rho  v_z  v_r  v_phi  H_z  H_r  H_phi  e
-#
-# Free-axis convention
-# ─────────────────────
-#   l_lo / l_hi faces  →  free axis is m  (range = global m indices)
-#   m_lo / m_hi faces  →  free axis is l  (range = global l indices)
-#
 boundary_conditions:
 
   # ── Inlet (z = 0) ────────────────────────────────────────────────────────
   l_lo:
-    - rho:   neumann
-      v_z:   { dirichlet: 0.0 }
-      v_r:   neumann
-      v_phi: neumann
-      e:     neumann
+    - rho:   { dirichlet: 1.0 }
+      v_z:   "rho_nb * v_z_nb * r_nb / (rho * r)"
+      v_r:   { dirichlet: 0.0 }
+      v_phi: { dirichlet: 0.0 }
+      e:     "beta / (2 * (gamma - 1)) * pow(rho, gamma - 1)"
       H_z:   "H_z0"
       H_r:   { dirichlet: 0.0 }
       H_phi: "r_0 / r"
@@ -212,20 +101,8 @@ boundary_conditions:
       H_phi: neumann
 
   # ── Inner wall + axis (r = r_inner, then axis of symmetry) ───────────────
-  #
-  # Three segments in l-direction (global l index along the M_LO face):
-  #
-  #   [0, 235]    Solid cathode wall. Was calculated as L_max * (z_center - transition_half_width) + 3 cells for robustness
-  #               Wall-tangent uses NEIGHBOUR slope (M_LO convention).
-  #
-  #   [236, 263]  Cathode tip / injection region.
-  #               Fixed density, energy, and H_z; wall-tangent for H_r.
-  #
-  #   [264, end]  Axis of symmetry (r → 0).
-  #               Lax–Friedrichs update for rho, v_z, e, H_z.
-  #               All other components are zero by symmetry.
   m_lo:
-    - range: [0, 235]
+    - range: [0, 640]
       rho:   neumann
       v_z:   neumann
       v_r:   "v_z_nb * r_z_nb"
@@ -235,17 +112,7 @@ boundary_conditions:
       H_r:   "H_z_nb * r_z_nb"
       H_phi: neumann
 
-    - range: [236, 263]
-      rho:   { dirichlet: 1.0 }
-      v_z:   neumann
-      v_r:   neumann
-      v_phi: { dirichlet: 0.0 }
-      e:     "beta / (2 * (gamma - 1))"
-      H_z:   neumann
-      H_r:   "H_z_nb * r_z_nb"
-      H_phi: neumann
-
-    - range: [264, -1]
+    - range: [641, -1]
       rho:   axis_lf
       v_z:   axis_lf
       v_r:   { dirichlet: 0.0 }
